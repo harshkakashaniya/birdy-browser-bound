@@ -38,6 +38,22 @@ All colors MUST be HSL.
 
     --radius: 0.5rem;
 
+    /* Game-specific colors */
+    --game-sky: 200 100% 85%;
+    --game-ground: 85 60% 40%;
+    --game-pipe: 120 40% 25%;
+    --game-bird: 50 100% 60%;
+    --game-success: 120 60% 50%;
+    --game-danger: 0 80% 60%;
+    
+    /* Game gradients */
+    --gradient-sky: linear-gradient(180deg, hsl(200 100% 85%), hsl(200 80% 70%));
+    --gradient-ground: linear-gradient(180deg, hsl(85 60% 40%), hsl(85 50% 30%));
+    
+    /* Game animations */
+    --bounce-duration: 0.3s;
+    --float-duration: 2s;
+
     --sidebar-background: 0 0% 98%;
 
     --sidebar-foreground: 240 5.3% 26.1%;

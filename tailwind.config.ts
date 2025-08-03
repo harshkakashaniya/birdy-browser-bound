@@ -52,6 +52,14 @@ export default {
 					DEFAULT: 'hsl(var(--card))',
 					foreground: 'hsl(var(--card-foreground))'
 				},
+				game: {
+					sky: 'hsl(var(--game-sky))',
+					ground: 'hsl(var(--game-ground))',
+					pipe: 'hsl(var(--game-pipe))',
+					bird: 'hsl(var(--game-bird))',
+					success: 'hsl(var(--game-success))',
+					danger: 'hsl(var(--game-danger))'
+				},
 				sidebar: {
 					DEFAULT: 'hsl(var(--sidebar-background))',
 					foreground: 'hsl(var(--sidebar-foreground))',
@@ -84,11 +92,27 @@ export default {
 					to: {
 						height: '0'
 					}
+				},
+				'bounce-bird': {
+					'0%': { transform: 'translateY(0px) rotate(0deg)' },
+					'50%': { transform: 'translateY(-10px) rotate(-15deg)' },
+					'100%': { transform: 'translateY(0px) rotate(0deg)' }
+				},
+				'float': {
+					'0%, 100%': { transform: 'translateY(0px)' },
+					'50%': { transform: 'translateY(-20px)' }
+				},
+				'slide-pipes': {
+					'0%': { transform: 'translateX(100vw)' },
+					'100%': { transform: 'translateX(-100px)' }
 				}
 			},
 			animation: {
 				'accordion-down': 'accordion-down 0.2s ease-out',
-				'accordion-up': 'accordion-up 0.2s ease-out'
+				'accordion-up': 'accordion-up 0.2s ease-out',
+				'bounce-bird': 'bounce-bird var(--bounce-duration) ease-out',
+				'float': 'float var(--float-duration) ease-in-out infinite',
+				'slide-pipes': 'slide-pipes 4s linear infinite'
 			}
 		}
 	},
