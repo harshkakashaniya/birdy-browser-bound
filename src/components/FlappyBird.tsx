@@ -292,13 +292,13 @@ export const FlappyBird = () => {
             );
             
             if (exitDistance < 30) {
-              // Successfully exited portal - position snake at the portal center
+              // Successfully exited portal - position snake AFTER the portal
               let returnX = 200; // Default position
               let returnY = 250; // Default position
               
               if (prev.enteredPortal) {
-                // Position snake at the center of the portal they entered
-                returnX = prev.enteredPortal.x + PIPE_WIDTH / 2 - BIRD_SIZE / 2;
+                // Position snake AFTER the portal they entered (to the right of it)
+                returnX = prev.enteredPortal.x + PIPE_WIDTH + 20; // 20px clearance after the pipe
                 returnY = prev.enteredPortal.topHeight + prev.enteredPortal.gap / 2 - BIRD_SIZE / 2;
                 
                 // Make sure snake is within game bounds
@@ -312,7 +312,7 @@ export const FlappyBird = () => {
               newPortalExit = null;
               newBirdX = returnX;
               newBirdY = returnY;
-              toast.success("Escaped the portal! Returned through the portal!");
+              toast.success("Escaped the portal! Continue your journey!");
               
               return {
                 ...prev,
