@@ -13,6 +13,8 @@ interface GameState {
   inSpecialWorld: boolean;
   worldCoins: Array<{ x: number; y: number; collected: boolean; id: string }>;
   colorTheme: number;
+  portalTimer: number;
+  portalExit: { x: number; y: number } | null;
 }
 
 const BIRD_SIZE = 30;
@@ -36,6 +38,8 @@ export const FlappyBird = () => {
     inSpecialWorld: false,
     worldCoins: [],
     colorTheme: 0,
+    portalTimer: 10,
+    portalExit: null,
   });
 
   const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
@@ -52,22 +56,32 @@ export const FlappyBird = () => {
       inSpecialWorld: false,
       worldCoins: [],
       colorTheme: 0,
+      portalTimer: 10,
+      portalExit: null,
     });
-    toast("Game Reset! Use WASD to control the bird!");
+    toast("Game Reset! Use WASD to control the snake!");
   };
 
-  // Generate random coins for special world
+  // Generate random frogs for special world
   const generateWorldCoins = () => {
-    const coins = [];
-    for (let i = 0; i < 15; i++) {
-      coins.push({
+    const frogs = [];
+    for (let i = 0; i < 12; i++) {
+      frogs.push({
         x: Math.random() * 340 + 30,
         y: Math.random() * 400 + 50,
         collected: false,
-        id: `coin-${i}-${Date.now()}`
+        id: `frog-${i}-${Date.now()}`
       });
     }
-    return coins;
+    return frogs;
+  };
+
+  // Generate portal exit
+  const generatePortalExit = () => {
+    return {
+      x: Math.random() * 300 + 50,
+      y: Math.random() * 300 + 50
+    };
   };
 
   // Calculate dynamic pipe gap based on coins
@@ -183,7 +197,7 @@ export const FlappyBird = () => {
                     newInSpecialWorld = true;
                     newWorldCoins = generateWorldCoins();
                     newCoins += 5;
-                    toast.success("🌟 Entered Portal! Collect the coins!");
+                    toast.success("🌟 Entered Portal! Collect the frogs! Find the exit in 10 seconds!");
                   }
                 } else if (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + pipe.gap) {
                   newGameOver = true;
@@ -211,29 +225,75 @@ export const FlappyBird = () => {
             }
           });
         } else {
-          // Special world - check coin collection and exit
-          newWorldCoins = newWorldCoins.map(coin => {
-            if (!coin.collected) {
+          // Special world - handle timer, frog collection, and exit
+          let newPortalTimer = prev.portalTimer;
+          let newPortalExit = prev.portalExit;
+          
+          // Initialize portal exit on first entry
+          if (!newPortalExit) {
+            newPortalExit = generatePortalExit();
+          }
+          
+          // Countdown timer
+          newPortalTimer -= 16 / 1000; // 16ms per frame
+          
+          if (newPortalTimer <= 0) {
+            // Timer expired - game over
+            newGameOver = true;
+            toast.error("Time's up! Game Over!");
+            return {
+              ...prev,
+              gameOver: newGameOver,
+              portalTimer: 0
+            };
+          }
+          
+          // Check frog collection
+          newWorldCoins = newWorldCoins.map(frog => {
+            if (!frog.collected) {
               const distance = Math.sqrt(
-                Math.pow(newBirdX - coin.x, 2) + Math.pow(newBirdY - coin.y, 2)
+                Math.pow(newBirdX - frog.x, 2) + Math.pow(newBirdY - frog.y, 2)
               );
               
-              if (distance < 20) {
+              if (distance < 25) {
                 newCoins += 2;
-                toast.success("🪙 +2 Coins!");
-                return { ...coin, collected: true };
+                toast.success("🐸 Frog collected! +2 Coins!");
+                return { ...frog, collected: true };
               }
             }
-            return coin;
+            return frog;
           });
 
-          // Check if all coins collected or exit condition
-          const uncollectedCoins = newWorldCoins.filter(coin => !coin.collected);
-          if (uncollectedCoins.length === 0 || Math.random() < 0.005) {
-            newInSpecialWorld = false;
-            newWorldCoins = [];
-            toast("Returned to normal world!");
+          // Check exit collision
+          if (newPortalExit) {
+            const exitDistance = Math.sqrt(
+              Math.pow(newBirdX - newPortalExit.x, 2) + Math.pow(newBirdY - newPortalExit.y, 2)
+            );
+            
+            if (exitDistance < 30) {
+              // Successfully exited portal
+              newInSpecialWorld = false;
+              newWorldCoins = [];
+              newPortalTimer = 10;
+              newPortalExit = null;
+              toast.success("Escaped the portal! Well done!");
+            }
           }
+          
+          return {
+            ...prev,
+            birdX: newBirdX,
+            birdY: newBirdY,
+            birdDirection: { x: newDirectionX, y: newDirectionY },
+            pipes: newPipes,
+            coins: newCoins,
+            gameOver: newGameOver,
+            inSpecialWorld: newInSpecialWorld,
+            worldCoins: newWorldCoins,
+            colorTheme: newColorTheme,
+            portalTimer: newPortalTimer,
+            portalExit: newPortalExit
+          };
         }
 
         return {
@@ -246,7 +306,9 @@ export const FlappyBird = () => {
           gameOver: newGameOver,
           inSpecialWorld: newInSpecialWorld,
           worldCoins: newWorldCoins,
-          colorTheme: newColorTheme
+          colorTheme: newColorTheme,
+          portalTimer: prev.portalTimer,
+          portalExit: prev.portalExit
         };
       });
     }, 16); // ~60 FPS
@@ -266,6 +328,7 @@ export const FlappyBird = () => {
           {gameState.inSpecialWorld && (
             <div className="bg-purple-500/20 px-3 py-1 rounded-lg border border-purple-500">
               <span className="text-purple-400 font-bold">✨ Portal World</span>
+              <span className="ml-2 text-red-400 font-bold">⏰ {Math.ceil(gameState.portalTimer)}s</span>
             </div>
           )}
         </div>
@@ -283,7 +346,7 @@ export const FlappyBird = () => {
               'bg-gradient-to-b from-pink-400 to-rose-600'
         }`}
       >
-        {/* Cute Snake Bird */}
+        {/* Small Snake */}
         <div
           className={`absolute w-[35px] h-[30px] transition-all duration-100 ${
             gameState.inSpecialWorld ? 'animate-pulse' : ''
@@ -297,49 +360,84 @@ export const FlappyBird = () => {
               gameState.birdDirection.y < 0 ? '-90deg' : '0deg'})`
           }}
         >
-          {/* Bird Body */}
+          {/* Snake Head */}
           <div className={`w-full h-full rounded-full border-2 border-white shadow-lg ${
-            gameState.inSpecialWorld ? 'bg-gradient-to-br from-purple-400 to-pink-400' : 
-            'bg-gradient-to-br from-orange-400 to-yellow-400'
+            gameState.inSpecialWorld ? 'bg-gradient-to-br from-emerald-400 to-green-500' : 
+            'bg-gradient-to-br from-green-500 to-emerald-600'
           }`}>
-            {/* Wing */}
-            <div className={`absolute w-3 h-4 rounded-full top-1 left-1 ${
-              gameState.inSpecialWorld ? 'bg-purple-300' : 'bg-orange-300'
+            {/* Snake Pattern */}
+            <div className={`absolute w-2 h-2 rounded-full top-1 left-2 ${
+              gameState.inSpecialWorld ? 'bg-emerald-300' : 'bg-green-400'
+            }`}></div>
+            <div className={`absolute w-1.5 h-1.5 rounded-full top-3 left-1 ${
+              gameState.inSpecialWorld ? 'bg-emerald-300' : 'bg-green-400'
             }`}></div>
             
-            {/* Eyes */}
-            <div className="absolute w-3 h-3 bg-white rounded-full top-1 right-1 border border-gray-300">
-              <div className="absolute w-2 h-2 bg-black rounded-full top-0.5 left-0.5"></div>
-              <div className="absolute w-0.5 h-0.5 bg-white rounded-full top-0.5 right-0.5"></div>
+            {/* Snake Eyes */}
+            <div className="absolute w-2.5 h-2.5 bg-yellow-400 rounded-full top-1.5 right-2 border border-black">
+              <div className="absolute w-1.5 h-1.5 bg-black rounded-full top-0.5 left-0.5"></div>
+            </div>
+            <div className="absolute w-2.5 h-2.5 bg-yellow-400 rounded-full top-1.5 right-0.5 border border-black">
+              <div className="absolute w-1.5 h-1.5 bg-black rounded-full top-0.5 left-0.5"></div>
             </div>
             
-            {/* Beak */}
-            <div className="absolute w-2 h-1 bg-orange-500 right-0 top-2 rounded-r-full"></div>
+            {/* Forked Tongue */}
+            <div className="absolute w-3 h-0.5 bg-red-500 right-0 top-3 rounded-r-full"></div>
+            <div className="absolute w-1 h-0.5 bg-red-500 right-0 top-2.5 rounded-r-full"></div>
             
-            {/* Tail feathers */}
-            <div className={`absolute w-2 h-3 left-0 top-2 rounded-l-full ${
-              gameState.inSpecialWorld ? 'bg-purple-300' : 'bg-yellow-300'
+            {/* Snake Body Trail */}
+            <div className={`absolute w-2.5 h-4 left-0 top-3 rounded-l-full ${
+              gameState.inSpecialWorld ? 'bg-emerald-400' : 'bg-green-500'
             }`}></div>
           </div>
         </div>
 
-        {/* World Coins (only in special world) */}
-        {gameState.inSpecialWorld && gameState.worldCoins.map((coin) => (
-          !coin.collected && (
+        {/* Frogs (only in special world) */}
+        {gameState.inSpecialWorld && gameState.worldCoins.map((frog) => (
+          !frog.collected && (
             <div
-              key={coin.id}
-              className="absolute w-6 h-6 bg-gradient-to-br from-yellow-400 to-yellow-600 rounded-full border-2 border-yellow-300 animate-pulse shadow-lg"
+              key={frog.id}
+              className="absolute w-8 h-8 bg-gradient-to-br from-green-400 to-green-600 rounded-full border-2 border-green-300 animate-bounce shadow-lg"
               style={{
-                left: `${coin.x}px`,
-                top: `${coin.y}px`,
-                animation: 'pulse 1s ease-in-out infinite'
+                left: `${frog.x}px`,
+                top: `${frog.y}px`,
+                animation: 'bounce 2s ease-in-out infinite'
               }}
             >
-              <div className="absolute inset-1 bg-gradient-to-br from-yellow-200 to-yellow-400 rounded-full"></div>
-              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-xs">🪙</div>
+              {/* Frog body */}
+              <div className="absolute inset-1 bg-gradient-to-br from-green-300 to-green-500 rounded-full"></div>
+              {/* Frog eyes */}
+              <div className="absolute w-2 h-2 bg-yellow-400 rounded-full top-0.5 left-1 border border-black">
+                <div className="absolute w-1 h-1 bg-black rounded-full top-0.5 left-0.5"></div>
+              </div>
+              <div className="absolute w-2 h-2 bg-yellow-400 rounded-full top-0.5 right-1 border border-black">
+                <div className="absolute w-1 h-1 bg-black rounded-full top-0.5 left-0.5"></div>
+              </div>
+              {/* Frog emoji overlay */}
+              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-xs">🐸</div>
             </div>
           )
         ))}
+
+        {/* Portal Exit (only in special world) */}
+        {gameState.inSpecialWorld && gameState.portalExit && (
+          <div
+            className="absolute w-12 h-12 bg-gradient-to-br from-cyan-400 to-blue-500 rounded-full border-4 border-yellow-400 animate-pulse shadow-xl"
+            style={{
+              left: `${gameState.portalExit.x}px`,
+              top: `${gameState.portalExit.y}px`,
+              animation: 'pulse 1.5s ease-in-out infinite'
+            }}
+          >
+            <div className="absolute inset-2 bg-gradient-to-br from-cyan-200 to-blue-300 rounded-full"></div>
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-lg font-bold text-white">
+              🚪
+            </div>
+            <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 text-xs font-bold text-yellow-400 animate-bounce">
+              EXIT
+            </div>
+          </div>
+        )}
 
         {/* Pipes (only in normal world) */}
         {!gameState.inSpecialWorld && gameState.pipes.map((pipe, index) => (
@@ -443,8 +541,8 @@ export const FlappyBird = () => {
         {!gameState.gameStarted && !gameState.gameOver && (
           <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
             <div className="text-center bg-card p-6 rounded-lg border shadow-lg">
-              <h2 className="text-2xl font-bold mb-2">Ready to Snake Fly?</h2>
-              <p className="mb-4">Use WASD keys to control the bird!</p>
+              <h2 className="text-2xl font-bold mb-2">Ready to Snake Adventure?</h2>
+              <p className="mb-4">Use WASD keys to control the snake!</p>
               <div className="grid grid-cols-3 gap-1 w-fit mx-auto mb-4">
                 <div></div>
                 <div className="bg-primary text-primary-foreground px-2 py-1 rounded text-xs">W</div>
@@ -460,9 +558,9 @@ export const FlappyBird = () => {
       </div>
 
       <div className="text-center text-sm text-muted-foreground max-w-md">
-        <p>Use <strong>WASD</strong> keys to control the bird like a snake!</p>
-        <p>Fly through <strong>purple portals</strong> to enter special worlds and collect coins!</p>
-        <p className="text-yellow-600 font-medium">Collect coins to increase your score!</p>
+        <p>Use <strong>WASD</strong> keys to control the snake!</p>
+        <p>Fly through <strong>purple portals</strong> to enter special worlds and collect frogs!</p>
+        <p className="text-yellow-600 font-medium">Find the exit within 10 seconds or game over!</p>
       </div>
 
       {gameState.gameStarted && !gameState.gameOver && (
