@@ -15,6 +15,7 @@ interface GameState {
   colorTheme: number;
   portalTimer: number;
   portalExit: { x: number; y: number } | null;
+  enteredPortal: { x: number; topHeight: number; gap: number } | null;
 }
 
 const BIRD_SIZE = 30;
@@ -40,6 +41,7 @@ export const FlappyBird = () => {
     colorTheme: 0,
     portalTimer: 10,
     portalExit: null,
+    enteredPortal: null,
   });
 
   const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
@@ -58,6 +60,7 @@ export const FlappyBird = () => {
       colorTheme: 0,
       portalTimer: 10,
       portalExit: null,
+      enteredPortal: null,
     });
     toast("Game Reset! Use WASD to control the snake!");
   };
@@ -197,7 +200,25 @@ export const FlappyBird = () => {
                     newInSpecialWorld = true;
                     newWorldCoins = generateWorldCoins();
                     newCoins += 5;
+                    // Store the portal information for exit positioning
+                    const enteredPortal = { x: pipe.x, topHeight: pipe.topHeight, gap: pipe.gap };
                     toast.success("🌟 Entered Portal! Collect the frogs! Find the exit in 10 seconds!");
+                    
+                    return {
+                      ...prev,
+                      birdX: newBirdX,
+                      birdY: newBirdY,
+                      birdDirection: { x: newDirectionX, y: newDirectionY },
+                      pipes: newPipes,
+                      coins: newCoins,
+                      gameOver: newGameOver,
+                      inSpecialWorld: newInSpecialWorld,
+                      worldCoins: newWorldCoins,
+                      colorTheme: newColorTheme,
+                      portalTimer: 10,
+                      portalExit: generatePortalExit(),
+                      enteredPortal: enteredPortal
+                    };
                   }
                 } else if (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + pipe.gap) {
                   newGameOver = true;
@@ -271,12 +292,43 @@ export const FlappyBird = () => {
             );
             
             if (exitDistance < 30) {
-              // Successfully exited portal
+              // Successfully exited portal - position snake at the portal center
+              let returnX = 200; // Default position
+              let returnY = 250; // Default position
+              
+              if (prev.enteredPortal) {
+                // Position snake at the center of the portal they entered
+                returnX = prev.enteredPortal.x + PIPE_WIDTH / 2 - BIRD_SIZE / 2;
+                returnY = prev.enteredPortal.topHeight + prev.enteredPortal.gap / 2 - BIRD_SIZE / 2;
+                
+                // Make sure snake is within game bounds
+                returnX = Math.max(0, Math.min(370, returnX));
+                returnY = Math.max(0, Math.min(470, returnY));
+              }
+              
               newInSpecialWorld = false;
               newWorldCoins = [];
               newPortalTimer = 10;
               newPortalExit = null;
-              toast.success("Escaped the portal! Well done!");
+              newBirdX = returnX;
+              newBirdY = returnY;
+              toast.success("Escaped the portal! Returned through the portal!");
+              
+              return {
+                ...prev,
+                birdX: newBirdX,
+                birdY: newBirdY,
+                birdDirection: { x: newDirectionX, y: newDirectionY },
+                pipes: newPipes,
+                coins: newCoins,
+                gameOver: newGameOver,
+                inSpecialWorld: newInSpecialWorld,
+                worldCoins: newWorldCoins,
+                colorTheme: newColorTheme,
+                portalTimer: newPortalTimer,
+                portalExit: newPortalExit,
+                enteredPortal: null
+              };
             }
           }
           
@@ -308,7 +360,8 @@ export const FlappyBird = () => {
           worldCoins: newWorldCoins,
           colorTheme: newColorTheme,
           portalTimer: prev.portalTimer,
-          portalExit: prev.portalExit
+          portalExit: prev.portalExit,
+          enteredPortal: prev.enteredPortal
         };
       });
     }, 16); // ~60 FPS
