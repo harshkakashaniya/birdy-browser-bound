@@ -6,7 +6,7 @@ interface GameState {
   birdX: number;
   birdY: number;
   birdDirection: { x: number; y: number };
-  pipes: Array<{ x: number; topHeight: number; passed: boolean; isSpecial?: boolean; gap: number }>;
+  pipes: Array<{ x: number; topHeight: number; passed: boolean; isSpecial?: boolean; gap: number; id?: string }>;
   coins: number;
   gameStarted: boolean;
   gameOver: boolean;
@@ -15,7 +15,9 @@ interface GameState {
   colorTheme: number;
   portalTimer: number;
   portalExit: { x: number; y: number } | null;
-  enteredPortal: { x: number; topHeight: number; gap: number } | null;
+  enteredPortal: { x: number; topHeight: number; gap: number; id: string } | null;
+  frogsEaten: number;
+  isEating: boolean;
 }
 
 const BIRD_SIZE = 30;
@@ -42,6 +44,8 @@ export const FlappyBird = () => {
     portalTimer: 10,
     portalExit: null,
     enteredPortal: null,
+    frogsEaten: 0,
+    isEating: false,
   });
 
   const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
@@ -61,6 +65,8 @@ export const FlappyBird = () => {
       portalTimer: 10,
       portalExit: null,
       enteredPortal: null,
+      frogsEaten: 0,
+      isEating: false,
     });
     toast("Game Reset! Use WASD to control the snake!");
   };
@@ -167,13 +173,15 @@ export const FlappyBird = () => {
             const currentGap = getCurrentPipeGap(prev.coins);
             const isSpecial = Math.random() < SPECIAL_PIPE_CHANCE;
             const topHeight = Math.random() * 200 + 50;
+            const pipeId = `pipe-${Date.now()}-${Math.random()}`;
             
             newPipes.push({
               x: 400,
               topHeight,
               passed: false,
               isSpecial,
-              gap: currentGap
+              gap: currentGap,
+              id: pipeId
             });
           }
 
@@ -201,7 +209,7 @@ export const FlappyBird = () => {
                     newWorldCoins = generateWorldCoins();
                     newCoins += 5;
                     // Store the portal information for exit positioning
-                    const enteredPortal = { x: pipe.x, topHeight: pipe.topHeight, gap: pipe.gap };
+                    const enteredPortal = { x: pipe.x, topHeight: pipe.topHeight, gap: pipe.gap, id: pipe.id || '' };
                     toast.success("🌟 Entered Portal! Collect the frogs! Find the exit in 10 seconds!");
                     
                     return {
@@ -270,6 +278,8 @@ export const FlappyBird = () => {
           }
           
           // Check frog collection
+          let newFrogsEaten = prev.frogsEaten;
+          let newIsEating = false;
           newWorldCoins = newWorldCoins.map(frog => {
             if (!frog.collected) {
               const distance = Math.sqrt(
@@ -278,12 +288,21 @@ export const FlappyBird = () => {
               
               if (distance < 25) {
                 newCoins += 2;
-                toast.success("🐸 Frog collected! +2 Coins!");
+                newFrogsEaten += 1;
+                newIsEating = true;
+                toast.success("🐸 Frog collected! +2 Coins! Snake grows!");
                 return { ...frog, collected: true };
               }
             }
             return frog;
           });
+          
+          // Reset eating animation after a short delay
+          if (newIsEating) {
+            setTimeout(() => {
+              setGameState(current => ({ ...current, isEating: false }));
+            }, 300);
+          }
 
           // Check exit collision
           if (newPortalExit) {
@@ -305,12 +324,8 @@ export const FlappyBird = () => {
                 returnX = Math.max(0, Math.min(370, returnX));
                 returnY = Math.max(0, Math.min(470, returnY));
                 
-                // REMOVE the portal pipe so snake can't re-enter it
-                newPipes = newPipes.filter(pipe => 
-                  !(pipe.x === prev.enteredPortal!.x && 
-                    pipe.topHeight === prev.enteredPortal!.topHeight && 
-                    pipe.isSpecial)
-                );
+                // REMOVE the portal pipe by ID so snake can't re-enter it
+                newPipes = newPipes.filter(pipe => pipe.id !== prev.enteredPortal!.id);
               }
               
               newInSpecialWorld = false;
@@ -334,7 +349,9 @@ export const FlappyBird = () => {
                 colorTheme: newColorTheme,
                 portalTimer: newPortalTimer,
                 portalExit: newPortalExit,
-                enteredPortal: null
+                enteredPortal: null,
+                frogsEaten: newFrogsEaten,
+                isEating: newIsEating
               };
             }
           }
@@ -351,7 +368,9 @@ export const FlappyBird = () => {
             worldCoins: newWorldCoins,
             colorTheme: newColorTheme,
             portalTimer: newPortalTimer,
-            portalExit: newPortalExit
+            portalExit: newPortalExit,
+            frogsEaten: newFrogsEaten,
+            isEating: newIsEating
           };
         }
 
@@ -368,7 +387,9 @@ export const FlappyBird = () => {
           colorTheme: newColorTheme,
           portalTimer: prev.portalTimer,
           portalExit: prev.portalExit,
-          enteredPortal: prev.enteredPortal
+          enteredPortal: prev.enteredPortal,
+          frogsEaten: prev.frogsEaten,
+          isEating: prev.isEating
         };
       });
     }, 16); // ~60 FPS
@@ -406,14 +427,16 @@ export const FlappyBird = () => {
               'bg-gradient-to-b from-pink-400 to-rose-600'
         }`}
       >
-        {/* Small Snake */}
+        {/* Enhanced Snake */}
         <div
-          className={`absolute w-[35px] h-[30px] transition-all duration-100 ${
+          className={`absolute transition-all duration-200 ${
             gameState.inSpecialWorld ? 'animate-pulse' : ''
-          }`}
+          } ${gameState.isEating ? 'animate-bounce' : ''}`}
           style={{
             left: `${gameState.birdX}px`,
             top: `${gameState.birdY}px`,
+            width: `${Math.min(50, 30 + gameState.frogsEaten * 3)}px`,
+            height: `${Math.min(40, 25 + gameState.frogsEaten * 2)}px`,
             transform: `rotate(${gameState.birdDirection.x > 0 ? '15deg' : 
               gameState.birdDirection.x < 0 ? '-15deg' : 
               gameState.birdDirection.y > 0 ? '90deg' : 
@@ -421,34 +444,103 @@ export const FlappyBird = () => {
           }}
         >
           {/* Snake Head */}
-          <div className={`w-full h-full rounded-full border-2 border-white shadow-lg ${
-            gameState.inSpecialWorld ? 'bg-gradient-to-br from-emerald-400 to-green-500' : 
-            'bg-gradient-to-br from-green-500 to-emerald-600'
+          <div className={`w-full h-full rounded-full border-3 shadow-xl relative overflow-hidden ${
+            gameState.frogsEaten >= 10 ? 'border-gold-400 bg-gradient-to-br from-amber-400 via-yellow-500 to-orange-600' :
+            gameState.frogsEaten >= 5 ? 'border-purple-400 bg-gradient-to-br from-purple-500 via-pink-500 to-red-500' :
+            gameState.inSpecialWorld ? 'border-cyan-400 bg-gradient-to-br from-emerald-400 via-green-500 to-teal-600' : 
+            'border-white bg-gradient-to-br from-green-500 via-emerald-600 to-green-700'
           }`}>
-            {/* Snake Pattern */}
-            <div className={`absolute w-2 h-2 rounded-full top-1 left-2 ${
+            
+            {/* Fancy Pattern Overlay */}
+            {gameState.frogsEaten >= 3 && (
+              <>
+                <div className={`absolute inset-1 rounded-full ${
+                  gameState.frogsEaten >= 10 ? 'bg-gradient-to-br from-gold-300/30 to-amber-500/30' :
+                  gameState.frogsEaten >= 5 ? 'bg-gradient-to-br from-purple-300/30 to-pink-500/30' :
+                  'bg-gradient-to-br from-cyan-300/30 to-emerald-500/30'
+                } animate-pulse`}></div>
+                {/* Diamond pattern for advanced snakes */}
+                <div className={`absolute w-2 h-2 top-1 left-1/2 transform -translate-x-1/2 rotate-45 ${
+                  gameState.frogsEaten >= 10 ? 'bg-gold-300' :
+                  gameState.frogsEaten >= 5 ? 'bg-purple-300' : 'bg-cyan-300'
+                }`}></div>
+              </>
+            )}
+            
+            {/* Enhanced Snake Pattern */}
+            <div className={`absolute w-2.5 h-2.5 rounded-full top-1 left-2 ${
+              gameState.frogsEaten >= 10 ? 'bg-amber-300' :
+              gameState.frogsEaten >= 5 ? 'bg-purple-300' :
               gameState.inSpecialWorld ? 'bg-emerald-300' : 'bg-green-400'
             }`}></div>
-            <div className={`absolute w-1.5 h-1.5 rounded-full top-3 left-1 ${
-              gameState.inSpecialWorld ? 'bg-emerald-300' : 'bg-green-400'
+            <div className={`absolute w-2 h-2 rounded-full top-3 left-1 ${
+              gameState.frogsEaten >= 10 ? 'bg-orange-300' :
+              gameState.frogsEaten >= 5 ? 'bg-pink-300' :
+              gameState.inSpecialWorld ? 'bg-teal-300' : 'bg-green-400'
             }`}></div>
             
-            {/* Snake Eyes */}
-            <div className="absolute w-2.5 h-2.5 bg-yellow-400 rounded-full top-1.5 right-2 border border-black">
-              <div className="absolute w-1.5 h-1.5 bg-black rounded-full top-0.5 left-0.5"></div>
+            {/* Enhanced Snake Eyes */}
+            <div className={`absolute w-3 h-3 rounded-full top-1.5 right-2 border-2 border-black ${
+              gameState.frogsEaten >= 10 ? 'bg-gold-200' :
+              gameState.frogsEaten >= 5 ? 'bg-purple-200' :
+              'bg-yellow-400'
+            }`}>
+              <div className={`absolute w-2 h-2 rounded-full top-0.5 left-0.5 ${
+                gameState.isEating ? 'bg-red-600' : 'bg-black'
+              }`}></div>
             </div>
-            <div className="absolute w-2.5 h-2.5 bg-yellow-400 rounded-full top-1.5 right-0.5 border border-black">
-              <div className="absolute w-1.5 h-1.5 bg-black rounded-full top-0.5 left-0.5"></div>
+            <div className={`absolute w-3 h-3 rounded-full top-1.5 right-0.5 border-2 border-black ${
+              gameState.frogsEaten >= 10 ? 'bg-gold-200' :
+              gameState.frogsEaten >= 5 ? 'bg-purple-200' :
+              'bg-yellow-400'
+            }`}>
+              <div className={`absolute w-2 h-2 rounded-full top-0.5 left-0.5 ${
+                gameState.isEating ? 'bg-red-600' : 'bg-black'
+              }`}></div>
             </div>
             
-            {/* Forked Tongue */}
-            <div className="absolute w-3 h-0.5 bg-red-500 right-0 top-3 rounded-r-full"></div>
-            <div className="absolute w-1 h-0.5 bg-red-500 right-0 top-2.5 rounded-r-full"></div>
+            {/* Enhanced Mouth - Opens when eating */}
+            <div className={`absolute right-0 rounded-r-full transition-all duration-200 ${
+              gameState.isEating ? 'w-4 h-3 top-2 bg-red-600 border-2 border-red-800' : 
+              'w-3 h-1 top-3 bg-green-800'
+            }`}>
+              {/* Teeth when eating */}
+              {gameState.isEating && (
+                <>
+                  <div className="absolute w-1 h-1 bg-white top-0 left-1"></div>
+                  <div className="absolute w-1 h-1 bg-white bottom-0 left-1"></div>
+                  <div className="absolute w-1 h-1 bg-white top-0 right-1"></div>
+                  <div className="absolute w-1 h-1 bg-white bottom-0 right-1"></div>
+                </>
+              )}
+            </div>
             
-            {/* Snake Body Trail */}
-            <div className={`absolute w-2.5 h-4 left-0 top-3 rounded-l-full ${
-              gameState.inSpecialWorld ? 'bg-emerald-400' : 'bg-green-500'
+            {/* Forked Tongue - Enhanced */}
+            <div className={`absolute bg-red-500 right-0 rounded-r-full transition-all duration-200 ${
+              gameState.isEating ? 'w-2 h-0.5 top-2.5' : 'w-3 h-0.5 top-3'
             }`}></div>
+            <div className={`absolute bg-red-500 right-0 rounded-r-full transition-all duration-200 ${
+              gameState.isEating ? 'w-1 h-0.5 top-2' : 'w-1 h-0.5 top-2.5'
+            }`}></div>
+            
+            {/* Snake Body Trail - Grows with frogs eaten */}
+            <div className={`absolute left-0 rounded-l-full ${
+              gameState.frogsEaten >= 10 ? 'bg-gradient-to-r from-amber-500 to-orange-500' :
+              gameState.frogsEaten >= 5 ? 'bg-gradient-to-r from-purple-500 to-pink-500' :
+              gameState.inSpecialWorld ? 'bg-gradient-to-r from-emerald-500 to-teal-500' : 'bg-green-500'
+            }`}
+            style={{
+              width: `${Math.min(8, 3 + gameState.frogsEaten * 0.5)}px`,
+              height: `${Math.min(12, 4 + gameState.frogsEaten * 0.8)}px`,
+              top: `${Math.max(3, 8 - gameState.frogsEaten * 0.3)}px`
+            }}></div>
+            
+            {/* Crown for legendary snakes */}
+            {gameState.frogsEaten >= 10 && (
+              <div className="absolute -top-2 left-1/2 transform -translate-x-1/2 text-yellow-400 text-xs animate-bounce">
+                👑
+              </div>
+            )}
           </div>
         </div>
 
