@@ -292,18 +292,25 @@ export const FlappyBird = () => {
             );
             
             if (exitDistance < 30) {
-              // Successfully exited portal - position snake AFTER the portal
+              // Successfully exited portal - position snake at the CENTER of the portal and REMOVE the portal
               let returnX = 200; // Default position
               let returnY = 250; // Default position
               
               if (prev.enteredPortal) {
-                // Position snake AFTER the portal they entered (to the right of it)
-                returnX = prev.enteredPortal.x + PIPE_WIDTH + 20; // 20px clearance after the pipe
+                // Position snake at the CENTER of the portal they entered
+                returnX = prev.enteredPortal.x + PIPE_WIDTH / 2 - BIRD_SIZE / 2;
                 returnY = prev.enteredPortal.topHeight + prev.enteredPortal.gap / 2 - BIRD_SIZE / 2;
                 
                 // Make sure snake is within game bounds
                 returnX = Math.max(0, Math.min(370, returnX));
                 returnY = Math.max(0, Math.min(470, returnY));
+                
+                // REMOVE the portal pipe so snake can't re-enter it
+                newPipes = newPipes.filter(pipe => 
+                  !(pipe.x === prev.enteredPortal!.x && 
+                    pipe.topHeight === prev.enteredPortal!.topHeight && 
+                    pipe.isSpecial)
+                );
               }
               
               newInSpecialWorld = false;
@@ -312,7 +319,7 @@ export const FlappyBird = () => {
               newPortalExit = null;
               newBirdX = returnX;
               newBirdY = returnY;
-              toast.success("Escaped the portal! Continue your journey!");
+              toast.success("Portal vanished! Continue your journey!");
               
               return {
                 ...prev,
@@ -450,24 +457,37 @@ export const FlappyBird = () => {
           !frog.collected && (
             <div
               key={frog.id}
-              className="absolute w-8 h-8 bg-gradient-to-br from-green-400 to-green-600 rounded-full border-2 border-green-300 animate-bounce shadow-lg"
+              className="absolute w-10 h-8 animate-bounce shadow-lg"
               style={{
                 left: `${frog.x}px`,
                 top: `${frog.y}px`,
                 animation: 'bounce 2s ease-in-out infinite'
               }}
             >
-              {/* Frog body */}
-              <div className="absolute inset-1 bg-gradient-to-br from-green-300 to-green-500 rounded-full"></div>
-              {/* Frog eyes */}
-              <div className="absolute w-2 h-2 bg-yellow-400 rounded-full top-0.5 left-1 border border-black">
-                <div className="absolute w-1 h-1 bg-black rounded-full top-0.5 left-0.5"></div>
+              {/* Frog body (oval shape) */}
+              <div className="absolute w-8 h-6 bg-gradient-to-br from-green-400 to-green-600 rounded-full border-2 border-green-300 left-1 top-1"></div>
+              
+              {/* Frog head (slightly overlapping body) */}
+              <div className="absolute w-6 h-5 bg-gradient-to-br from-green-300 to-green-500 rounded-full border border-green-400 left-2 top-0"></div>
+              
+              {/* Large protruding eyes on top of head */}
+              <div className="absolute w-2.5 h-2.5 bg-yellow-400 rounded-full top-0 left-1.5 border border-black z-10">
+                <div className="absolute w-1.5 h-1.5 bg-black rounded-full top-0.5 left-0.5"></div>
               </div>
-              <div className="absolute w-2 h-2 bg-yellow-400 rounded-full top-0.5 right-1 border border-black">
-                <div className="absolute w-1 h-1 bg-black rounded-full top-0.5 left-0.5"></div>
+              <div className="absolute w-2.5 h-2.5 bg-yellow-400 rounded-full top-0 right-1.5 border border-black z-10">
+                <div className="absolute w-1.5 h-1.5 bg-black rounded-full top-0.5 left-0.5"></div>
               </div>
-              {/* Frog emoji overlay */}
-              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-xs">🐸</div>
+              
+              {/* Frog mouth */}
+              <div className="absolute w-3 h-1 bg-green-600 rounded-full left-1/2 top-3 transform -translate-x-1/2"></div>
+              
+              {/* Front legs/arms */}
+              <div className="absolute w-2 h-3 bg-green-500 rounded-full left-0 top-2"></div>
+              <div className="absolute w-2 h-3 bg-green-500 rounded-full right-0 top-2"></div>
+              
+              {/* Back legs (visible from side) */}
+              <div className="absolute w-1.5 h-4 bg-green-600 rounded-full left-0.5 bottom-0"></div>
+              <div className="absolute w-1.5 h-4 bg-green-600 rounded-full right-0.5 bottom-0"></div>
             </div>
           )
         ))}
