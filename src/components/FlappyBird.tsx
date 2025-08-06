@@ -2,10 +2,17 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
+interface BodySegment {
+  x: number;
+  y: number;
+  id: string;
+}
+
 interface GameState {
   birdX: number;
   birdY: number;
   birdDirection: { x: number; y: number };
+  bodySegments: BodySegment[];
   pipes: Array<{ x: number; topHeight: number; passed: boolean; isSpecial?: boolean; gap: number; id?: string }>;
   coins: number;
   gameStarted: boolean;
@@ -18,15 +25,17 @@ interface GameState {
   enteredPortal: { x: number; topHeight: number; gap: number; id: string } | null;
   frogsEaten: number;
   isEating: boolean;
+  usedPortalIds: Set<string>;
 }
 
 const BIRD_SIZE = 30;
 const PIPE_WIDTH = 60;
 const INITIAL_PIPE_GAP = 250;
 const MIN_PIPE_GAP = 120;
-const MOVE_SPEED = 3;
+const MOVE_SPEED = 4; // Increased from 3 for more reactive controls
 const PIPE_SPEED = 2;
 const SPECIAL_PIPE_CHANCE = 0.2;
+const SEGMENT_FOLLOW_DISTANCE = 25; // Distance between body segments
 
 export const FlappyBird = () => {
   const gameRef = useRef<HTMLDivElement>(null);
@@ -34,6 +43,7 @@ export const FlappyBird = () => {
     birdX: 200,
     birdY: 250,
     birdDirection: { x: 0, y: 0 },
+    bodySegments: [],
     pipes: [],
     coins: 0,
     gameStarted: false,
@@ -46,6 +56,7 @@ export const FlappyBird = () => {
     enteredPortal: null,
     frogsEaten: 0,
     isEating: false,
+    usedPortalIds: new Set(),
   });
 
   const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
@@ -55,6 +66,7 @@ export const FlappyBird = () => {
       birdX: 200,
       birdY: 250,
       birdDirection: { x: 0, y: 0 },
+      bodySegments: [],
       pipes: [],
       coins: 0,
       gameStarted: false,
@@ -67,6 +79,7 @@ export const FlappyBird = () => {
       enteredPortal: null,
       frogsEaten: 0,
       isEating: false,
+      usedPortalIds: new Set(),
     });
     toast("Game Reset! Use WASD to control the snake!");
   };
@@ -104,7 +117,70 @@ export const FlappyBird = () => {
     return Math.floor(coins / 20);
   };
 
-  // WASD Controls
+  // Helper function to update body segments
+  const updateBodySegments = (headX: number, headY: number, currentSegments: BodySegment[], frogsEaten: number) => {
+    const targetSegmentCount = Math.min(10, frogsEaten); // Max 10 segments
+    const newSegments: BodySegment[] = [];
+    
+    if (targetSegmentCount > 0) {
+      // Add head position as first segment
+      const headSegment = { x: headX, y: headY, id: 'head' };
+      
+      // Calculate positions for body segments
+      for (let i = 0; i < targetSegmentCount; i++) {
+        if (i === 0) {
+          // First segment follows the head
+          if (currentSegments.length > 0) {
+            const prevSegment = currentSegments[0];
+            const dx = headX - prevSegment.x;
+            const dy = headY - prevSegment.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance > SEGMENT_FOLLOW_DISTANCE) {
+              const ratio = SEGMENT_FOLLOW_DISTANCE / distance;
+              newSegments.push({
+                x: headX - dx * ratio,
+                y: headY - dy * ratio,
+                id: `segment-${i}`
+              });
+            } else {
+              newSegments.push({ ...prevSegment, id: `segment-${i}` });
+            }
+          } else {
+            // No previous segments, place first segment behind head
+            newSegments.push({
+              x: headX - SEGMENT_FOLLOW_DISTANCE,
+              y: headY,
+              id: `segment-${i}`
+            });
+          }
+        } else {
+          // Each segment follows the previous one
+          const prevSegment = newSegments[i - 1];
+          const targetSegment = currentSegments[i] || { x: prevSegment.x - SEGMENT_FOLLOW_DISTANCE, y: prevSegment.y };
+          
+          const dx = prevSegment.x - targetSegment.x;
+          const dy = prevSegment.y - targetSegment.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          if (distance > SEGMENT_FOLLOW_DISTANCE) {
+            const ratio = SEGMENT_FOLLOW_DISTANCE / distance;
+            newSegments.push({
+              x: prevSegment.x - dx * ratio,
+              y: prevSegment.y - dy * ratio,
+              id: `segment-${i}`
+            });
+          } else {
+            newSegments.push({ ...targetSegment, id: `segment-${i}` });
+          }
+        }
+      }
+    }
+    
+    return newSegments;
+  };
+
+  // WASD Controls - More responsive
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       e.preventDefault();
@@ -137,13 +213,13 @@ export const FlappyBird = () => {
     };
   }, [gameState.gameStarted]);
 
-  // Game loop
+  // Game loop - Enhanced with body segments and better portal handling
   useEffect(() => {
     if (!gameState.gameStarted || gameState.gameOver) return;
 
     const gameLoop = setInterval(() => {
       setGameState(prev => {
-        // Calculate new bird direction based on pressed keys
+        // Calculate new snake direction based on pressed keys (more responsive)
         let newDirectionX = 0;
         let newDirectionY = 0;
         
@@ -152,9 +228,12 @@ export const FlappyBird = () => {
         if (pressedKeys.has('a')) newDirectionX = -MOVE_SPEED;
         if (pressedKeys.has('d')) newDirectionX = MOVE_SPEED;
 
-        // Update bird position
+        // Update snake head position
         let newBirdX = Math.max(0, Math.min(370, prev.birdX + newDirectionX));
         let newBirdY = Math.max(0, Math.min(470, prev.birdY + newDirectionY));
+        
+        // Update body segments
+        let newBodySegments = updateBodySegments(newBirdX, newBirdY, prev.bodySegments, prev.frogsEaten);
         
         let newPipes = [...prev.pipes];
         let newGameOver = prev.gameOver;
@@ -162,6 +241,7 @@ export const FlappyBird = () => {
         let newInSpecialWorld = prev.inSpecialWorld;
         let newWorldCoins = [...prev.worldCoins];
         let newColorTheme = getCurrentTheme(newCoins);
+        let newUsedPortalIds = new Set(prev.usedPortalIds);
 
         if (!newInSpecialWorld) {
           // Normal world - move pipes
@@ -195,8 +275,8 @@ export const FlappyBird = () => {
             const pipeLeft = pipe.x;
             const pipeRight = pipe.x + PIPE_WIDTH;
 
-            // Check if bird is within pipe x range
-            if (birdRight > pipeLeft && birdLeft < pipeRight) {
+            // Check if bird is within pipe x range and hasn't used this portal before
+            if (birdRight > pipeLeft && birdLeft < pipeRight && !newUsedPortalIds.has(pipe.id || '')) {
               if (pipe.isSpecial) {
                 // Special pipe - check if bird goes through the portal
                 const portalTop = pipe.topHeight + pipe.gap * 0.3;
@@ -204,10 +284,11 @@ export const FlappyBird = () => {
                 
                 if (birdTop >= portalTop && birdBottom <= portalBottom) {
                   // Bird entered special world!
-                  if (!newInSpecialWorld) {
+                  if (!newInSpecialWorld && pipe.id) {
                     newInSpecialWorld = true;
                     newWorldCoins = generateWorldCoins();
                     newCoins += 5;
+                    newUsedPortalIds.add(pipe.id);
                     // Store the portal information for exit positioning
                     const enteredPortal = { x: pipe.x, topHeight: pipe.topHeight, gap: pipe.gap, id: pipe.id || '' };
                     toast.success("🌟 Entered Portal! Collect the frogs! Find the exit in 10 seconds!");
@@ -216,6 +297,7 @@ export const FlappyBird = () => {
                       ...prev,
                       birdX: newBirdX,
                       birdY: newBirdY,
+                      bodySegments: newBodySegments,
                       birdDirection: { x: newDirectionX, y: newDirectionY },
                       pipes: newPipes,
                       coins: newCoins,
@@ -225,7 +307,8 @@ export const FlappyBird = () => {
                       colorTheme: newColorTheme,
                       portalTimer: 10,
                       portalExit: generatePortalExit(),
-                      enteredPortal: enteredPortal
+                      enteredPortal: enteredPortal,
+                      usedPortalIds: newUsedPortalIds
                     };
                   }
                 } else if (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + pipe.gap) {
@@ -324,8 +407,8 @@ export const FlappyBird = () => {
                 returnX = Math.max(0, Math.min(370, returnX));
                 returnY = Math.max(0, Math.min(470, returnY));
                 
-                // REMOVE the portal pipe by ID so snake can't re-enter it
-                newPipes = newPipes.filter(pipe => pipe.id !== prev.enteredPortal!.id);
+                // Don't remove portal immediately, just mark as used
+                // Portal is already marked as used, so it won't be re-enterable
               }
               
               newInSpecialWorld = false;
@@ -340,6 +423,7 @@ export const FlappyBird = () => {
                 ...prev,
                 birdX: newBirdX,
                 birdY: newBirdY,
+                bodySegments: newBodySegments,
                 birdDirection: { x: newDirectionX, y: newDirectionY },
                 pipes: newPipes,
                 coins: newCoins,
@@ -351,7 +435,8 @@ export const FlappyBird = () => {
                 portalExit: newPortalExit,
                 enteredPortal: null,
                 frogsEaten: newFrogsEaten,
-                isEating: newIsEating
+                isEating: newIsEating,
+                usedPortalIds: newUsedPortalIds
               };
             }
           }
@@ -360,6 +445,7 @@ export const FlappyBird = () => {
             ...prev,
             birdX: newBirdX,
             birdY: newBirdY,
+            bodySegments: newBodySegments,
             birdDirection: { x: newDirectionX, y: newDirectionY },
             pipes: newPipes,
             coins: newCoins,
@@ -370,7 +456,8 @@ export const FlappyBird = () => {
             portalTimer: newPortalTimer,
             portalExit: newPortalExit,
             frogsEaten: newFrogsEaten,
-            isEating: newIsEating
+            isEating: newIsEating,
+            usedPortalIds: newUsedPortalIds
           };
         }
 
@@ -378,6 +465,7 @@ export const FlappyBird = () => {
           ...prev,
           birdX: newBirdX,
           birdY: newBirdY,
+          bodySegments: newBodySegments,
           birdDirection: { x: newDirectionX, y: newDirectionY },
           pipes: newPipes,
           coins: newCoins,
@@ -389,10 +477,11 @@ export const FlappyBird = () => {
           portalExit: prev.portalExit,
           enteredPortal: prev.enteredPortal,
           frogsEaten: prev.frogsEaten,
-          isEating: prev.isEating
+          isEating: prev.isEating,
+          usedPortalIds: newUsedPortalIds
         };
       });
-    }, 16); // ~60 FPS
+    }, 12); // Increased FPS for more responsive controls (~83 FPS)
 
     return () => clearInterval(gameLoop);
   }, [gameState.gameStarted, gameState.gameOver, pressedKeys]);
@@ -427,9 +516,10 @@ export const FlappyBird = () => {
               'bg-gradient-to-b from-pink-400 to-rose-600'
         }`}
       >
-        {/* Enhanced Snake */}
+        {/* Enhanced Snake with Body Segments */}
+        {/* Snake Head */}
         <div
-          className={`absolute transition-all duration-200 ${
+          className={`absolute transition-all duration-100 ${
             gameState.inSpecialWorld ? 'animate-pulse' : ''
           } ${gameState.isEating ? 'animate-bounce' : ''}`}
           style={{
@@ -440,7 +530,8 @@ export const FlappyBird = () => {
             transform: `rotate(${gameState.birdDirection.x > 0 ? '15deg' : 
               gameState.birdDirection.x < 0 ? '-15deg' : 
               gameState.birdDirection.y > 0 ? '90deg' : 
-              gameState.birdDirection.y < 0 ? '-90deg' : '0deg'})`
+              gameState.birdDirection.y < 0 ? '-90deg' : '0deg'})`,
+            zIndex: 100
           }}
         >
           {/* Snake Head */}
@@ -603,7 +694,35 @@ export const FlappyBird = () => {
             </div>
           </div>
         )}
-
+        
+        {/* Snake Body Segments */}
+        {gameState.bodySegments.map((segment, index) => (
+          <div
+            key={segment.id}
+            className={`absolute transition-all duration-150 rounded-full border-2 shadow-lg ${
+              gameState.frogsEaten >= 10 ? 'border-amber-400 bg-gradient-to-br from-amber-500 to-orange-500' :
+              gameState.frogsEaten >= 5 ? 'border-purple-400 bg-gradient-to-br from-purple-500 to-pink-500' :
+              gameState.inSpecialWorld ? 'border-emerald-400 bg-gradient-to-br from-emerald-500 to-teal-500' : 
+              'border-green-400 bg-gradient-to-br from-green-500 to-green-600'
+            }`}
+            style={{
+              left: `${segment.x}px`,
+              top: `${segment.y}px`,
+              width: `${Math.max(15, 25 - index * 1.5)}px`,
+              height: `${Math.max(12, 20 - index * 1.2)}px`,
+              zIndex: 90 - index // Ensure proper layering
+            }}
+          >
+            {/* Body segment pattern */}
+            <div className={`absolute inset-1 rounded-full ${
+              gameState.frogsEaten >= 10 ? 'bg-gradient-to-br from-gold-400/40 to-amber-600/40' :
+              gameState.frogsEaten >= 5 ? 'bg-gradient-to-br from-purple-400/40 to-pink-600/40' :
+              gameState.inSpecialWorld ? 'bg-gradient-to-br from-emerald-400/40 to-teal-600/40' : 
+              'bg-gradient-to-br from-green-400/40 to-green-700/40'
+            }`}></div>
+          </div>
+        ))}
+        
         {/* Pipes (only in normal world) */}
         {!gameState.inSpecialWorld && gameState.pipes.map((pipe, index) => (
           <div key={index}>
