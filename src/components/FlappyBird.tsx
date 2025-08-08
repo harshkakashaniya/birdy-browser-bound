@@ -18,7 +18,7 @@ interface GameState {
   gameStarted: boolean;
   gameOver: boolean;
   inSpecialWorld: boolean;
-  worldCoins: Array<{ x: number; y: number; collected: boolean; id: string }>;
+  worldCoins: Array<{ x: number; y: number; collected: boolean; id: string; isBad?: boolean }>;
   colorTheme: number;
   portalTimer: number;
   portalExit: { x: number; y: number } | null;
@@ -26,6 +26,14 @@ interface GameState {
   frogsEaten: number;
   isEating: boolean;
   usedPortalIds: Set<string>;
+  currentPortalGame: string | null;
+  portalGameResult: number | null;
+  showPortalGame: boolean;
+  gameData: {
+    dice: [number, number];
+    cards: number[];
+    selectedCards: number[];
+  };
 }
 
 const BIRD_SIZE = 30;
@@ -57,11 +65,19 @@ export const FlappyBird = () => {
     frogsEaten: 0,
     isEating: false,
     usedPortalIds: new Set(),
+    currentPortalGame: null,
+    portalGameResult: null,
+    showPortalGame: false,
+    gameData: {
+      dice: [1, 1],
+      cards: [1, 2, 3, 4, 5],
+      selectedCards: []
+    }
   });
 
   const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
 
-  const resetGame = () => {
+const resetGame = () => {
     setGameState({
       birdX: 200,
       birdY: 250,
@@ -80,22 +96,70 @@ export const FlappyBird = () => {
       frogsEaten: 0,
       isEating: false,
       usedPortalIds: new Set(),
+      currentPortalGame: null,
+      portalGameResult: null,
+      showPortalGame: false,
+      gameData: {
+        dice: [1, 1],
+        cards: [1, 2, 3, 4, 5],
+        selectedCards: []
+      }
     });
     toast("Game Reset! Use WASD to control the snake!");
   };
 
-  // Generate random frogs for special world
+  // Generate random frogs for special world (including bad frogs)
   const generateWorldCoins = () => {
     const frogs = [];
     for (let i = 0; i < 12; i++) {
+      // 20% chance for bad frog (red)
+      const isBad = Math.random() < 0.2;
       frogs.push({
         x: Math.random() * 340 + 30,
         y: Math.random() * 400 + 50,
         collected: false,
-        id: `frog-${i}-${Date.now()}`
+        id: `frog-${i}-${Date.now()}`,
+        isBad: isBad
       });
     }
     return frogs;
+  };
+
+  // Generate random portal game
+  const generatePortalGame = () => {
+    const games = ['dice', 'cards', 'spinner', 'treasure'];
+    return games[Math.floor(Math.random() * games.length)];
+  };
+
+  // Execute portal game
+  const executePortalGame = (gameType: string) => {
+    let result = 0;
+    let gameData = { dice: [1, 1], cards: [1, 2, 3, 4, 5], selectedCards: [] };
+
+    switch (gameType) {
+      case 'dice':
+        const dice1 = Math.floor(Math.random() * 6) + 1;
+        const dice2 = Math.floor(Math.random() * 6) + 1;
+        result = dice1 + dice2;
+        gameData.dice = [dice1, dice2];
+        break;
+      case 'cards':
+        const availableCards = [1, 2, 3, 4, 5].sort(() => Math.random() - 0.5);
+        const card1 = availableCards[0];
+        const card2 = availableCards[1];
+        result = card1 + card2;
+        gameData.cards = availableCards;
+        gameData.selectedCards = [card1, card2];
+        break;
+      case 'spinner':
+        result = Math.floor(Math.random() * 10) + 1; // 1-10 points
+        break;
+      case 'treasure':
+        result = Math.floor(Math.random() * 15) + 5; // 5-20 points
+        break;
+    }
+
+    return { result, gameData };
   };
 
   // Generate portal exit
@@ -285,13 +349,18 @@ export const FlappyBird = () => {
                 if (birdTop >= portalTop && birdBottom <= portalBottom) {
                   // Bird entered special world!
                   if (!newInSpecialWorld && pipe.id) {
+                    const portalGame = generatePortalGame();
+                    const gameResult = executePortalGame(portalGame);
+                    
                     newInSpecialWorld = true;
                     newWorldCoins = generateWorldCoins();
-                    newCoins += 5;
+                    newCoins += 5 + gameResult.result; // Portal entry bonus + game result
                     newUsedPortalIds.add(pipe.id);
+                    
                     // Store the portal information for exit positioning
                     const enteredPortal = { x: pipe.x, topHeight: pipe.topHeight, gap: pipe.gap, id: pipe.id || '' };
-                    toast.success("🌟 Entered Portal! Collect the frogs! Find the exit in 10 seconds!");
+                    
+                    toast.success(`🌟 Portal Game: ${portalGame.toUpperCase()}! +${gameResult.result} bonus points!`);
                     
                     return {
                       ...prev,
@@ -308,7 +377,11 @@ export const FlappyBird = () => {
                       portalTimer: 10,
                       portalExit: generatePortalExit(),
                       enteredPortal: enteredPortal,
-                      usedPortalIds: newUsedPortalIds
+                      usedPortalIds: newUsedPortalIds,
+                      currentPortalGame: portalGame,
+                      portalGameResult: gameResult.result,
+                      showPortalGame: true,
+                      gameData: gameResult.gameData
                     };
                   }
                 } else if (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + pipe.gap) {
@@ -370,10 +443,18 @@ export const FlappyBird = () => {
               );
               
               if (distance < 25) {
-                newCoins += 2;
-                newFrogsEaten += 1;
-                newIsEating = true;
-                toast.success("🐸 Frog collected! +2 Coins! Snake grows!");
+                if (frog.isBad) {
+                  // Bad frog - lose points
+                  newCoins = Math.max(0, newCoins - 10);
+                  newIsEating = true;
+                  toast.error("💀 Bad Frog! -10 Coins!");
+                } else {
+                  // Good frog - gain points and grow
+                  newCoins += 2;
+                  newFrogsEaten += 1;
+                  newIsEating = true;
+                  toast.success("🐸 Frog collected! +2 Coins! Snake grows!");
+                }
                 return { ...frog, collected: true };
               }
             }
@@ -647,30 +728,63 @@ export const FlappyBird = () => {
                 animation: 'bounce 2s ease-in-out infinite'
               }}
             >
-              {/* Frog body (oval shape) */}
-              <div className="absolute w-8 h-6 bg-gradient-to-br from-green-400 to-green-600 rounded-full border-2 border-green-300 left-1 top-1"></div>
+              {/* Frog body (oval shape) - Red for bad frogs */}
+              <div className={`absolute w-8 h-6 rounded-full border-2 left-1 top-1 ${
+                frog.isBad 
+                  ? 'bg-gradient-to-br from-red-500 to-red-700 border-red-400' 
+                  : 'bg-gradient-to-br from-green-400 to-green-600 border-green-300'
+              }`}></div>
               
-              {/* Frog head (slightly overlapping body) */}
-              <div className="absolute w-6 h-5 bg-gradient-to-br from-green-300 to-green-500 rounded-full border border-green-400 left-2 top-0"></div>
+              {/* Frog head (slightly overlapping body) - Red for bad frogs */}
+              <div className={`absolute w-6 h-5 rounded-full border left-2 top-0 ${
+                frog.isBad 
+                  ? 'bg-gradient-to-br from-red-400 to-red-600 border-red-500' 
+                  : 'bg-gradient-to-br from-green-300 to-green-500 border-green-400'
+              }`}></div>
               
-              {/* Large protruding eyes on top of head */}
-              <div className="absolute w-2.5 h-2.5 bg-yellow-400 rounded-full top-0 left-1.5 border border-black z-10">
-                <div className="absolute w-1.5 h-1.5 bg-black rounded-full top-0.5 left-0.5"></div>
+              {/* Large protruding eyes on top of head - Red for bad frogs */}
+              <div className={`absolute w-2.5 h-2.5 rounded-full top-0 left-1.5 border border-black z-10 ${
+                frog.isBad ? 'bg-red-300' : 'bg-yellow-400'
+              }`}>
+                <div className={`absolute w-1.5 h-1.5 rounded-full top-0.5 left-0.5 ${
+                  frog.isBad ? 'bg-red-800' : 'bg-black'
+                }`}></div>
               </div>
-              <div className="absolute w-2.5 h-2.5 bg-yellow-400 rounded-full top-0 right-1.5 border border-black z-10">
-                <div className="absolute w-1.5 h-1.5 bg-black rounded-full top-0.5 left-0.5"></div>
+              <div className={`absolute w-2.5 h-2.5 rounded-full top-0 right-1.5 border border-black z-10 ${
+                frog.isBad ? 'bg-red-300' : 'bg-yellow-400'
+              }`}>
+                <div className={`absolute w-1.5 h-1.5 rounded-full top-0.5 left-0.5 ${
+                  frog.isBad ? 'bg-red-800' : 'bg-black'
+                }`}></div>
               </div>
               
-              {/* Frog mouth */}
-              <div className="absolute w-3 h-1 bg-green-600 rounded-full left-1/2 top-3 transform -translate-x-1/2"></div>
+              {/* Frog mouth - Darker for bad frogs */}
+              <div className={`absolute w-3 h-1 rounded-full left-1/2 top-3 transform -translate-x-1/2 ${
+                frog.isBad ? 'bg-red-800' : 'bg-green-600'
+              }`}></div>
               
-              {/* Front legs/arms */}
-              <div className="absolute w-2 h-3 bg-green-500 rounded-full left-0 top-2"></div>
-              <div className="absolute w-2 h-3 bg-green-500 rounded-full right-0 top-2"></div>
+              {/* Front legs/arms - Red for bad frogs */}
+              <div className={`absolute w-2 h-3 rounded-full left-0 top-2 ${
+                frog.isBad ? 'bg-red-600' : 'bg-green-500'
+              }`}></div>
+              <div className={`absolute w-2 h-3 rounded-full right-0 top-2 ${
+                frog.isBad ? 'bg-red-600' : 'bg-green-500'
+              }`}></div>
               
-              {/* Back legs (visible from side) */}
-              <div className="absolute w-1.5 h-4 bg-green-600 rounded-full left-0.5 bottom-0"></div>
-              <div className="absolute w-1.5 h-4 bg-green-600 rounded-full right-0.5 bottom-0"></div>
+              {/* Back legs (visible from side) - Red for bad frogs */}
+              <div className={`absolute w-1.5 h-4 rounded-full left-0.5 bottom-0 ${
+                frog.isBad ? 'bg-red-700' : 'bg-green-600'
+              }`}></div>
+              <div className={`absolute w-1.5 h-4 rounded-full right-0.5 bottom-0 ${
+                frog.isBad ? 'bg-red-700' : 'bg-green-600'
+              }`}></div>
+              
+              {/* Bad frog indicator */}
+              {frog.isBad && (
+                <div className="absolute -top-2 left-1/2 transform -translate-x-1/2 text-xs animate-pulse">
+                  💀
+                </div>
+              )}
             </div>
           )
         ))}
@@ -803,6 +917,76 @@ export const FlappyBird = () => {
 
         {/* Ground */}
         <div className="absolute bottom-0 w-full h-12 bg-gradient-to-b from-green-700 to-green-900 border-t-2 border-foreground" />
+
+        {/* Portal Game Result Overlay */}
+        {gameState.showPortalGame && gameState.currentPortalGame && (
+          <div className="absolute inset-0 bg-background/90 flex items-center justify-center z-50">
+            <div className="text-center bg-card p-6 rounded-lg border shadow-lg max-w-md">
+              <h2 className="text-2xl font-bold mb-4 text-purple-500">🌟 Portal Game!</h2>
+              
+              {gameState.currentPortalGame === 'dice' && (
+                <div className="mb-4">
+                  <p className="mb-2">🎲 Rolling Two Dice:</p>
+                  <div className="flex justify-center gap-2 mb-2">
+                    <div className="w-12 h-12 bg-white border-2 border-black rounded flex items-center justify-center text-xl font-bold">
+                      {gameState.gameData.dice[0]}
+                    </div>
+                    <div className="w-12 h-12 bg-white border-2 border-black rounded flex items-center justify-center text-xl font-bold">
+                      {gameState.gameData.dice[1]}
+                    </div>
+                  </div>
+                  <p>Total: <span className="font-bold text-green-500">{gameState.portalGameResult}</span></p>
+                </div>
+              )}
+              
+              {gameState.currentPortalGame === 'cards' && (
+                <div className="mb-4">
+                  <p className="mb-2">🃏 Drawing 2 Cards from 5:</p>
+                  <div className="flex justify-center gap-1 mb-2">
+                    {gameState.gameData.cards.map((card, index) => (
+                      <div 
+                        key={index} 
+                        className={`w-8 h-10 rounded border-2 flex items-center justify-center text-sm font-bold ${
+                          gameState.gameData.selectedCards.includes(card)
+                            ? 'bg-yellow-400 border-yellow-600 text-black'
+                            : 'bg-gray-200 border-gray-400 text-gray-600'
+                        }`}
+                      >
+                        {card}
+                      </div>
+                    ))}
+                  </div>
+                  <p>Total: <span className="font-bold text-green-500">{gameState.portalGameResult}</span></p>
+                </div>
+              )}
+              
+              {gameState.currentPortalGame === 'spinner' && (
+                <div className="mb-4">
+                  <p className="mb-2">🎡 Spinning the Wheel:</p>
+                  <div className="w-16 h-16 bg-gradient-to-br from-purple-400 to-pink-400 rounded-full flex items-center justify-center text-2xl font-bold text-white mx-auto mb-2 animate-spin">
+                    {gameState.portalGameResult}
+                  </div>
+                  <p>You got: <span className="font-bold text-green-500">{gameState.portalGameResult} points!</span></p>
+                </div>
+              )}
+              
+              {gameState.currentPortalGame === 'treasure' && (
+                <div className="mb-4">
+                  <p className="mb-2">🏆 Opening Treasure Chest:</p>
+                  <div className="text-4xl mb-2">💰</div>
+                  <p>Treasure found: <span className="font-bold text-green-500">{gameState.portalGameResult} coins!</span></p>
+                </div>
+              )}
+              
+              <Button 
+                onClick={() => setGameState(prev => ({ ...prev, showPortalGame: false }))} 
+                className="w-full"
+              >
+                Continue Adventure
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Game Over Overlay */}
         {gameState.gameOver && (
