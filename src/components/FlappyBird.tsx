@@ -17,18 +17,23 @@ interface GameState {
   coins: number;
   gameStarted: boolean;
   gameOver: boolean;
+  gamePaused: boolean;
   inSpecialWorld: boolean;
   worldCoins: Array<{ x: number; y: number; collected: boolean; id: string; isBad?: boolean }>;
+  mainWorldFrogs: Array<{ x: number; y: number; collected: boolean; id: string; isBad?: boolean }>;
   colorTheme: number;
   portalTimer: number;
   portalExit: { x: number; y: number } | null;
   enteredPortal: { x: number; topHeight: number; gap: number; id: string } | null;
   frogsEaten: number;
   isEating: boolean;
+  isBadFrogReaction: boolean;
   usedPortalIds: Set<string>;
   currentPortalGame: string | null;
   portalGameResult: number | null;
   showPortalGame: boolean;
+  isInvincible: boolean;
+  invincibilityTimer: number;
   gameData: {
     dice: [number, number];
     cards: number[];
@@ -56,18 +61,23 @@ export const FlappyBird = () => {
     coins: 0,
     gameStarted: false,
     gameOver: false,
+    gamePaused: false,
     inSpecialWorld: false,
     worldCoins: [],
+    mainWorldFrogs: [],
     colorTheme: 0,
     portalTimer: 10,
     portalExit: null,
     enteredPortal: null,
     frogsEaten: 0,
     isEating: false,
+    isBadFrogReaction: false,
     usedPortalIds: new Set(),
     currentPortalGame: null,
     portalGameResult: null,
     showPortalGame: false,
+    isInvincible: false,
+    invincibilityTimer: 0,
     gameData: {
       dice: [1, 1],
       cards: [1, 2, 3, 4, 5],
@@ -76,6 +86,23 @@ export const FlappyBird = () => {
   });
 
   const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
+
+  // Generate random frogs for main world
+  const generateMainWorldFrogs = () => {
+    const frogs = [];
+    for (let i = 0; i < 3; i++) {
+      // 15% chance for bad frog (red) in main world
+      const isBad = Math.random() < 0.15;
+      frogs.push({
+        x: Math.random() * 340 + 30,
+        y: Math.random() * 400 + 50,
+        collected: false,
+        id: `main-frog-${i}-${Date.now()}`,
+        isBad: isBad
+      });
+    }
+    return frogs;
+  };
 
 const resetGame = () => {
     setGameState({
@@ -87,18 +114,23 @@ const resetGame = () => {
       coins: 0,
       gameStarted: false,
       gameOver: false,
+      gamePaused: false,
       inSpecialWorld: false,
       worldCoins: [],
+      mainWorldFrogs: generateMainWorldFrogs(),
       colorTheme: 0,
       portalTimer: 10,
       portalExit: null,
       enteredPortal: null,
       frogsEaten: 0,
       isEating: false,
+      isBadFrogReaction: false,
       usedPortalIds: new Set(),
       currentPortalGame: null,
       portalGameResult: null,
       showPortalGame: false,
+      isInvincible: false,
+      invincibilityTimer: 0,
       gameData: {
         dice: [1, 1],
         cards: [1, 2, 3, 4, 5],
@@ -244,17 +276,29 @@ const resetGame = () => {
     return newSegments;
   };
 
-  // WASD Controls - More responsive
+  // WASD Controls + Spacebar Pause - More responsive
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      e.preventDefault();
       const key = e.key.toLowerCase();
       
+      // Handle spacebar pause
+      if (key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        if (gameState.gameStarted && !gameState.gameOver) {
+          setGameState(prev => ({ ...prev, gamePaused: !prev.gamePaused }));
+          toast(gameState.gamePaused ? "Game Resumed!" : "Game Paused!");
+        }
+        return;
+      }
+      
       if (['w', 'a', 's', 'd'].includes(key)) {
+        e.preventDefault();
         if (!gameState.gameStarted) {
           setGameState(prev => ({ ...prev, gameStarted: true }));
         }
-        setPressedKeys(prev => new Set(prev.add(key)));
+        if (!gameState.gamePaused) {
+          setPressedKeys(prev => new Set(prev.add(key)));
+        }
       }
     };
 
@@ -275,11 +319,11 @@ const resetGame = () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [gameState.gameStarted]);
+  }, [gameState.gameStarted, gameState.gamePaused]);
 
   // Game loop - Enhanced with body segments and better portal handling
   useEffect(() => {
-    if (!gameState.gameStarted || gameState.gameOver) return;
+    if (!gameState.gameStarted || gameState.gameOver || gameState.gamePaused) return;
 
     const gameLoop = setInterval(() => {
       setGameState(prev => {
@@ -304,8 +348,23 @@ const resetGame = () => {
         let newCoins = prev.coins;
         let newInSpecialWorld = prev.inSpecialWorld;
         let newWorldCoins = [...prev.worldCoins];
+        let newMainWorldFrogs = [...prev.mainWorldFrogs];
         let newColorTheme = getCurrentTheme(newCoins);
         let newUsedPortalIds = new Set(prev.usedPortalIds);
+        let newFrogsEaten = prev.frogsEaten;
+        let newIsEating = prev.isEating;
+        let newIsBadFrogReaction = prev.isBadFrogReaction;
+        let newIsInvincible = prev.isInvincible;
+        let newInvincibilityTimer = prev.invincibilityTimer;
+
+        // Handle invincibility timer
+        if (newIsInvincible) {
+          newInvincibilityTimer -= 16 / 1000; // 16ms per frame
+          if (newInvincibilityTimer <= 0) {
+            newIsInvincible = false;
+            newInvincibilityTimer = 0;
+          }
+        }
 
         if (!newInSpecialWorld) {
           // Normal world - move pipes
@@ -329,7 +388,51 @@ const resetGame = () => {
             });
           }
 
-          // Check pipe collisions and portal entry
+          // Check main world frog collection
+          newMainWorldFrogs = newMainWorldFrogs.map(frog => {
+            if (!frog.collected) {
+              const distance = Math.sqrt(
+                Math.pow(newBirdX - frog.x, 2) + Math.pow(newBirdY - frog.y, 2)
+              );
+              
+              if (distance < 25) {
+                if (frog.isBad) {
+                  // Bad frog - lose points and react
+                  newCoins = Math.max(0, newCoins - 10);
+                  newIsEating = true;
+                  newIsBadFrogReaction = true;
+                  toast.error("💀 Bad Frog! -10 Frogs!");
+                  
+                  // Reset bad frog reaction after delay
+                  setTimeout(() => {
+                    setGameState(current => ({ ...current, isBadFrogReaction: false }));
+                  }, 800);
+                } else {
+                  // Good frog - gain points and grow
+                  newCoins += 2;
+                  newFrogsEaten += 1;
+                  newIsEating = true;
+                  toast.success("🐸 Frog collected! +2 Frogs! Snake grows!");
+                }
+                return { ...frog, collected: true };
+              }
+            }
+            return frog;
+          });
+
+          // Add new frogs periodically in main world
+          if (newMainWorldFrogs.filter(f => !f.collected).length < 2 && Math.random() < 0.005) {
+            const isBad = Math.random() < 0.15;
+            newMainWorldFrogs.push({
+              x: Math.random() * 340 + 30,
+              y: Math.random() * 400 + 50,
+              collected: false,
+              id: `main-frog-${Date.now()}-${Math.random()}`,
+              isBad: isBad
+            });
+          }
+
+          // Check pipe collisions and portal entry (only if not invincible for pipes)
           newPipes.forEach(pipe => {
             const birdLeft = newBirdX;
             const birdRight = newBirdX + BIRD_SIZE;
@@ -360,7 +463,7 @@ const resetGame = () => {
                     // Store the portal information for exit positioning
                     const enteredPortal = { x: pipe.x, topHeight: pipe.topHeight, gap: pipe.gap, id: pipe.id || '' };
                     
-                    toast.success(`🌟 Portal Game: ${portalGame.toUpperCase()}! +${gameResult.result} bonus points!`);
+                    toast.success(`🌟 Portal Game: ${portalGame.toUpperCase()}! +${gameResult.result} bonus frogs!`);
                     
                     return {
                       ...prev,
@@ -373,26 +476,32 @@ const resetGame = () => {
                       gameOver: newGameOver,
                       inSpecialWorld: newInSpecialWorld,
                       worldCoins: newWorldCoins,
+                      mainWorldFrogs: newMainWorldFrogs,
                       colorTheme: newColorTheme,
                       portalTimer: 10,
                       portalExit: generatePortalExit(),
                       enteredPortal: enteredPortal,
+                      frogsEaten: newFrogsEaten,
+                      isEating: newIsEating,
+                      isBadFrogReaction: newIsBadFrogReaction,
                       usedPortalIds: newUsedPortalIds,
                       currentPortalGame: portalGame,
                       portalGameResult: gameResult.result,
                       showPortalGame: true,
+                      isInvincible: false,
+                      invincibilityTimer: 0,
                       gameData: gameResult.gameData
                     };
                   }
-                } else if (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + pipe.gap) {
+                } else if (!newIsInvincible && (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + pipe.gap)) {
                   newGameOver = true;
-                  toast.error(`Game Over! Total Coins: ${newCoins}`);
+                  toast.error(`Game Over! Total Frogs: ${newCoins}`);
                 }
               } else {
-                // Regular pipe collision
-                if (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + pipe.gap) {
+                // Regular pipe collision (only if not invincible)
+                if (!newIsInvincible && (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + pipe.gap)) {
                   newGameOver = true;
-                  toast.error(`Game Over! Total Coins: ${newCoins}`);
+                  toast.error(`Game Over! Total Frogs: ${newCoins}`);
                 }
               }
             }
@@ -403,9 +512,9 @@ const resetGame = () => {
               newCoins += pipe.isSpecial ? 3 : 1;
               
               if (pipe.isSpecial) {
-                toast.success(`⭐ Portal Passed! +3 Coins!`);
+                toast.success(`⭐ Portal Passed! +3 Frogs!`);
               } else {
-                toast.success(`Pipe Passed! +1 Coin`);
+                toast.success(`Pipe Passed! +1 Frog`);
               }
             }
           });
@@ -433,9 +542,7 @@ const resetGame = () => {
             };
           }
           
-          // Check frog collection
-          let newFrogsEaten = prev.frogsEaten;
-          let newIsEating = false;
+          // Check frog collection in portal world
           newWorldCoins = newWorldCoins.map(frog => {
             if (!frog.collected) {
               const distance = Math.sqrt(
@@ -444,16 +551,22 @@ const resetGame = () => {
               
               if (distance < 25) {
                 if (frog.isBad) {
-                  // Bad frog - lose points
+                  // Bad frog - lose points and react
                   newCoins = Math.max(0, newCoins - 10);
                   newIsEating = true;
-                  toast.error("💀 Bad Frog! -10 Coins!");
+                  newIsBadFrogReaction = true;
+                  toast.error("💀 Bad Frog! -10 Frogs!");
+                  
+                  // Reset bad frog reaction after delay
+                  setTimeout(() => {
+                    setGameState(current => ({ ...current, isBadFrogReaction: false }));
+                  }, 800);
                 } else {
                   // Good frog - gain points and grow
                   newCoins += 2;
                   newFrogsEaten += 1;
                   newIsEating = true;
-                  toast.success("🐸 Frog collected! +2 Coins! Snake grows!");
+                  toast.success("🐸 Frog collected! +2 Frogs! Snake grows!");
                 }
                 return { ...frog, collected: true };
               }
@@ -462,7 +575,7 @@ const resetGame = () => {
           });
           
           // Reset eating animation after a short delay
-          if (newIsEating) {
+          if (newIsEating && !newIsBadFrogReaction) {
             setTimeout(() => {
               setGameState(current => ({ ...current, isEating: false }));
             }, 300);
@@ -533,11 +646,15 @@ const resetGame = () => {
             gameOver: newGameOver,
             inSpecialWorld: newInSpecialWorld,
             worldCoins: newWorldCoins,
+            mainWorldFrogs: newMainWorldFrogs,
             colorTheme: newColorTheme,
             portalTimer: newPortalTimer,
             portalExit: newPortalExit,
             frogsEaten: newFrogsEaten,
             isEating: newIsEating,
+            isBadFrogReaction: newIsBadFrogReaction,
+            isInvincible: newIsInvincible,
+            invincibilityTimer: newInvincibilityTimer,
             usedPortalIds: newUsedPortalIds
           };
         }
@@ -553,19 +670,23 @@ const resetGame = () => {
           gameOver: newGameOver,
           inSpecialWorld: newInSpecialWorld,
           worldCoins: newWorldCoins,
+          mainWorldFrogs: newMainWorldFrogs,
           colorTheme: newColorTheme,
           portalTimer: prev.portalTimer,
           portalExit: prev.portalExit,
           enteredPortal: prev.enteredPortal,
-          frogsEaten: prev.frogsEaten,
-          isEating: prev.isEating,
+          frogsEaten: newFrogsEaten,
+          isEating: newIsEating,
+          isBadFrogReaction: newIsBadFrogReaction,
+          isInvincible: newIsInvincible,
+          invincibilityTimer: newInvincibilityTimer,
           usedPortalIds: newUsedPortalIds
         };
       });
-    }, 12); // Increased FPS for more responsive controls (~83 FPS)
+    }, gameState.coins > 70 ? 20 : 12); // Optimize performance after 70 points
 
     return () => clearInterval(gameLoop);
-  }, [gameState.gameStarted, gameState.gameOver, pressedKeys]);
+  }, [gameState.gameStarted, gameState.gameOver, gameState.gamePaused, pressedKeys, gameState.coins]);
 
   return (
     <div className="flex flex-col items-center gap-4 p-4">
@@ -573,9 +694,14 @@ const resetGame = () => {
         <h1 className="text-4xl font-bold mb-2">🐍 Snake Bird Adventure</h1>
         <div className="flex justify-center gap-4 mb-4">
           <div className="bg-card px-3 py-1 rounded-lg border">
-            <span className="text-sm text-muted-foreground">Coins:</span>
-            <span className="ml-1 font-bold text-yellow-500">🪙 {gameState.coins}</span>
+            <span className="text-sm text-muted-foreground">Frogs:</span>
+            <span className="ml-1 font-bold text-green-500">🐸 {gameState.coins}</span>
           </div>
+          {gameState.gamePaused && (
+            <div className="bg-yellow-500/20 px-3 py-1 rounded-lg border border-yellow-500">
+              <span className="text-yellow-400 font-bold">⏸️ PAUSED</span>
+            </div>
+          )}
           {gameState.inSpecialWorld && (
             <div className="bg-purple-500/20 px-3 py-1 rounded-lg border border-purple-500">
               <span className="text-purple-400 font-bold">✨ Portal World</span>
@@ -602,7 +728,9 @@ const resetGame = () => {
         <div
           className={`absolute transition-all duration-100 ${
             gameState.inSpecialWorld ? 'animate-pulse' : ''
-          } ${gameState.isEating ? 'animate-bounce' : ''}`}
+          } ${gameState.isEating ? 'animate-bounce' : ''} ${
+            gameState.isBadFrogReaction ? 'animate-ping' : ''
+          } ${gameState.isInvincible ? 'animate-pulse opacity-70' : ''}`}
           style={{
             left: `${gameState.birdX}px`,
             top: `${gameState.birdY}px`,
@@ -651,23 +779,25 @@ const resetGame = () => {
               gameState.inSpecialWorld ? 'bg-teal-300' : 'bg-green-400'
             }`}></div>
             
-            {/* Enhanced Snake Eyes */}
+            {/* Enhanced Snake Eyes with bad frog reaction */}
             <div className={`absolute w-3 h-3 rounded-full top-1.5 right-2 border-2 border-black ${
               gameState.frogsEaten >= 10 ? 'bg-gold-200' :
               gameState.frogsEaten >= 5 ? 'bg-purple-200' :
               'bg-yellow-400'
-            }`}>
+            } ${gameState.isBadFrogReaction ? 'transform -translate-x-1' : ''}`}>
               <div className={`absolute w-2 h-2 rounded-full top-0.5 left-0.5 ${
-                gameState.isEating ? 'bg-red-600' : 'bg-black'
+                gameState.isEating ? 'bg-red-600' : 
+                gameState.isBadFrogReaction ? 'bg-red-600' : 'bg-black'
               }`}></div>
             </div>
             <div className={`absolute w-3 h-3 rounded-full top-1.5 right-0.5 border-2 border-black ${
               gameState.frogsEaten >= 10 ? 'bg-gold-200' :
               gameState.frogsEaten >= 5 ? 'bg-purple-200' :
               'bg-yellow-400'
-            }`}>
+            } ${gameState.isBadFrogReaction ? 'transform -translate-x-1' : ''}`}>
               <div className={`absolute w-2 h-2 rounded-full top-0.5 left-0.5 ${
-                gameState.isEating ? 'bg-red-600' : 'bg-black'
+                gameState.isEating ? 'bg-red-600' : 
+                gameState.isBadFrogReaction ? 'bg-red-600' : 'bg-black'
               }`}></div>
             </div>
             
@@ -715,6 +845,56 @@ const resetGame = () => {
             )}
           </div>
         </div>
+
+        {/* Frogs in main world */}
+        {!gameState.inSpecialWorld && gameState.mainWorldFrogs.map((frog) => (
+          !frog.collected && (
+            <div
+              key={frog.id}
+              className="absolute w-8 h-6 animate-bounce shadow-lg"
+              style={{
+                left: `${frog.x}px`,
+                top: `${frog.y}px`,
+                animation: 'bounce 2s ease-in-out infinite'
+              }}
+            >
+              {/* Smaller frog for main world */}
+              <div className={`absolute w-6 h-4 rounded-full border left-1 top-1 ${
+                frog.isBad 
+                  ? 'bg-gradient-to-br from-red-500 to-red-700 border-red-400' 
+                  : 'bg-gradient-to-br from-green-400 to-green-600 border-green-300'
+              }`}></div>
+              
+              <div className={`absolute w-4 h-3 rounded-full border left-2 top-0 ${
+                frog.isBad 
+                  ? 'bg-gradient-to-br from-red-400 to-red-600 border-red-500' 
+                  : 'bg-gradient-to-br from-green-300 to-green-500 border-green-400'
+              }`}></div>
+              
+              {/* Small eyes */}
+              <div className={`absolute w-1.5 h-1.5 rounded-full top-0 left-1 border border-black z-10 ${
+                frog.isBad ? 'bg-red-300' : 'bg-yellow-400'
+              }`}>
+                <div className={`absolute w-1 h-1 rounded-full top-0 left-0 ${
+                  frog.isBad ? 'bg-red-800' : 'bg-black'
+                }`}></div>
+              </div>
+              <div className={`absolute w-1.5 h-1.5 rounded-full top-0 right-1 border border-black z-10 ${
+                frog.isBad ? 'bg-red-300' : 'bg-yellow-400'
+              }`}>
+                <div className={`absolute w-1 h-1 rounded-full top-0 left-0 ${
+                  frog.isBad ? 'bg-red-800' : 'bg-black'
+                }`}></div>
+              </div>
+              
+              {frog.isBad && (
+                <div className="absolute -top-1 left-1/2 transform -translate-x-1/2 text-xs animate-pulse">
+                  💀
+                </div>
+              )}
+            </div>
+          )
+        ))}
 
         {/* Frogs (only in special world) */}
         {gameState.inSpecialWorld && gameState.worldCoins.map((frog) => (
@@ -994,8 +1174,8 @@ const resetGame = () => {
             <div className="text-center bg-card p-6 rounded-lg border shadow-lg">
               <h2 className="text-2xl font-bold mb-2 text-destructive">Game Over!</h2>
               <div className="mb-4 space-y-2">
-                <p>Total Coins: <span className="font-bold text-yellow-500">🪙 {gameState.coins}</span></p>
-                {gameState.coins >= 50 && <p className="text-green-500 font-bold">🎉 Coin Master!</p>}
+                <p>Total Frogs: <span className="font-bold text-green-500">🐸 {gameState.coins}</span></p>
+                {gameState.coins >= 50 && <p className="text-green-500 font-bold">🎉 Frog Master!</p>}
                 {gameState.coins >= 100 && <p className="text-purple-500 font-bold">👑 Portal Champion!</p>}
               </div>
               <Button onClick={resetGame} className="w-full">
@@ -1026,9 +1206,10 @@ const resetGame = () => {
       </div>
 
       <div className="text-center text-sm text-muted-foreground max-w-md">
-        <p>Use <strong>WASD</strong> keys to control the snake!</p>
+        <p>Use <strong>WASD</strong> keys to control the snake! Press <strong>SPACEBAR</strong> to pause!</p>
         <p>Fly through <strong>purple portals</strong> to enter special worlds and collect frogs!</p>
         <p className="text-yellow-600 font-medium">Find the exit within 10 seconds or game over!</p>
+        <p className="text-green-600 font-medium">Collect frogs in both main world and portal worlds!</p>
       </div>
 
       {gameState.gameStarted && !gameState.gameOver && (
