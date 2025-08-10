@@ -561,7 +561,7 @@ export const FlappyBird = () => {
           let newPortalTimer = prev.portalTimer;
           let newPortalExit = prev.portalExit;
           
-          if (!newPortalExit) {
+          if (!newPortalExit && prev.portalCountdownActive) {
             newPortalExit = generatePortalExit();
           }
           
@@ -624,7 +624,7 @@ export const FlappyBird = () => {
             const btnDistance = Math.sqrt(
               Math.pow(newBirdX - prev.portalGameButton.x, 2) + Math.pow(newBirdY - prev.portalGameButton.y, 2)
             );
-            if (btnDistance < 30) {
+            if (btnDistance < 40) {
               const gameType = prev.currentPortalGame || generatePortalGame();
               const { result, gameData } = executePortalGame(gameType);
               newCoins += 5 + result;
@@ -788,7 +788,11 @@ export const FlappyBird = () => {
           {gameState.inSpecialWorld && (
             <div className="bg-purple-500/20 px-3 py-1 rounded-lg border border-purple-500">
               <span className="text-purple-400 font-bold">✨ Portal World</span>
-              <span className="ml-2 text-red-400 font-bold">⏰ {Math.ceil(gameState.portalTimer)}s</span>
+              {gameState.portalCountdownActive ? (
+                <span className="ml-2 text-red-400 font-bold">⏰ {Math.ceil(gameState.portalTimer)}s</span>
+              ) : (
+                <span className="ml-2 text-yellow-400 font-bold">Press the glowing button!</span>
+              )}
             </div>
           )}
           {gameState.isAdvancedLevel && (
@@ -1052,7 +1056,7 @@ export const FlappyBird = () => {
         {gameState.inSpecialWorld && !gameState.portalGameTriggered && gameState.portalGameButton && (
           <div
             className="absolute w-16 h-16 rounded-full border-4 border-yellow-400 bg-gradient-to-br from-purple-400 to-pink-400 shadow-xl flex items-center justify-center animate-pulse"
-            style={{ left: `${gameState.portalGameButton.x}px`, top: `${gameState.portalGameButton.y}px` }}
+            style={{ left: `${gameState.portalGameButton.x}px`, top: `${gameState.portalGameButton.y}px`, zIndex: 200 }}
           >
             <span className="text-white font-bold text-xs text-center">PRESS</span>
           </div>
