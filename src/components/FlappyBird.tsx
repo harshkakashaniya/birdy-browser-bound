@@ -13,7 +13,7 @@ interface GameState {
   birdY: number;
   birdDirection: { x: number; y: number };
   bodySegments: BodySegment[];
-  pipes: Array<{ x: number; topHeight: number; passed: boolean; isSpecial?: boolean; gap: number; id?: string }>;
+  pipes: Array<{ x: number; topHeight: number; passed: boolean; isSpecial?: boolean; gap: number; id?: string; yVelocity?: number }>;
   coins: number;
   gameStarted: boolean;
   gameOver: boolean;
@@ -39,16 +39,19 @@ interface GameState {
     cards: number[];
     selectedCards: number[];
   };
+  lastPortalX: number;
+  isAdvancedLevel: boolean;
 }
 
 const BIRD_SIZE = 30;
 const PIPE_WIDTH = 60;
 const INITIAL_PIPE_GAP = 250;
 const MIN_PIPE_GAP = 120;
-const MOVE_SPEED = 4; // Increased from 3 for more reactive controls
+const MOVE_SPEED = 4;
 const PIPE_SPEED = 2;
 const SPECIAL_PIPE_CHANCE = 0.2;
-const SEGMENT_FOLLOW_DISTANCE = 25; // Distance between body segments
+const SEGMENT_FOLLOW_DISTANCE = 25;
+const MIN_PORTAL_DISTANCE = 300; // 5 pipes worth of distance
 
 export const FlappyBird = () => {
   const gameRef = useRef<HTMLDivElement>(null);
@@ -82,7 +85,9 @@ export const FlappyBird = () => {
       dice: [1, 1],
       cards: [1, 2, 3, 4, 5],
       selectedCards: []
-    }
+    },
+    lastPortalX: -1000,
+    isAdvancedLevel: false
   });
 
   const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
@@ -91,7 +96,6 @@ export const FlappyBird = () => {
   const generateMainWorldFrogs = () => {
     const frogs = [];
     for (let i = 0; i < 3; i++) {
-      // 15% chance for bad frog (red) in main world
       const isBad = Math.random() < 0.15;
       frogs.push({
         x: Math.random() * 340 + 30,
@@ -104,7 +108,7 @@ export const FlappyBird = () => {
     return frogs;
   };
 
-const resetGame = () => {
+  const resetGame = () => {
     setGameState({
       birdX: 200,
       birdY: 250,
@@ -135,16 +139,16 @@ const resetGame = () => {
         dice: [1, 1],
         cards: [1, 2, 3, 4, 5],
         selectedCards: []
-      }
+      },
+      lastPortalX: -1000,
+      isAdvancedLevel: false
     });
-    toast("Game Reset! Use WASD to control the snake!");
   };
 
   // Generate random frogs for special world (including bad frogs)
   const generateWorldCoins = () => {
     const frogs = [];
     for (let i = 0; i < 12; i++) {
-      // 20% chance for bad frog (red)
       const isBad = Math.random() < 0.2;
       frogs.push({
         x: Math.random() * 340 + 30,
@@ -184,10 +188,10 @@ const resetGame = () => {
         gameData.selectedCards = [card1, card2];
         break;
       case 'spinner':
-        result = Math.floor(Math.random() * 10) + 1; // 1-10 points
+        result = Math.floor(Math.random() * 10) + 1;
         break;
       case 'treasure':
-        result = Math.floor(Math.random() * 15) + 5; // 5-20 points
+        result = Math.floor(Math.random() * 15) + 5;
         break;
     }
 
@@ -215,17 +219,12 @@ const resetGame = () => {
 
   // Helper function to update body segments
   const updateBodySegments = (headX: number, headY: number, currentSegments: BodySegment[], frogsEaten: number) => {
-    const targetSegmentCount = Math.min(10, frogsEaten); // Max 10 segments
+    const targetSegmentCount = Math.min(10, frogsEaten);
     const newSegments: BodySegment[] = [];
     
     if (targetSegmentCount > 0) {
-      // Add head position as first segment
-      const headSegment = { x: headX, y: headY, id: 'head' };
-      
-      // Calculate positions for body segments
       for (let i = 0; i < targetSegmentCount; i++) {
         if (i === 0) {
-          // First segment follows the head
           if (currentSegments.length > 0) {
             const prevSegment = currentSegments[0];
             const dx = headX - prevSegment.x;
@@ -243,7 +242,6 @@ const resetGame = () => {
               newSegments.push({ ...prevSegment, id: `segment-${i}` });
             }
           } else {
-            // No previous segments, place first segment behind head
             newSegments.push({
               x: headX - SEGMENT_FOLLOW_DISTANCE,
               y: headY,
@@ -251,7 +249,6 @@ const resetGame = () => {
             });
           }
         } else {
-          // Each segment follows the previous one
           const prevSegment = newSegments[i - 1];
           const targetSegment = currentSegments[i] || { x: prevSegment.x - SEGMENT_FOLLOW_DISTANCE, y: prevSegment.y };
           
@@ -276,17 +273,15 @@ const resetGame = () => {
     return newSegments;
   };
 
-  // WASD Controls + Spacebar Pause - More responsive
+  // WASD Controls + Spacebar Pause
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       
-      // Handle spacebar pause
       if (key === ' ' || e.code === 'Space') {
         e.preventDefault();
         if (gameState.gameStarted && !gameState.gameOver) {
           setGameState(prev => ({ ...prev, gamePaused: !prev.gamePaused }));
-          toast(gameState.gamePaused ? "Game Resumed!" : "Game Paused!");
         }
         return;
       }
@@ -321,13 +316,13 @@ const resetGame = () => {
     };
   }, [gameState.gameStarted, gameState.gamePaused]);
 
-  // Game loop - Enhanced with body segments and better portal handling
+  // Game loop - Optimized for performance
   useEffect(() => {
     if (!gameState.gameStarted || gameState.gameOver || gameState.gamePaused) return;
 
     const gameLoop = setInterval(() => {
       setGameState(prev => {
-        // Calculate new snake direction based on pressed keys (more responsive)
+        // Calculate new snake direction based on pressed keys
         let newDirectionX = 0;
         let newDirectionY = 0;
         
@@ -356,10 +351,12 @@ const resetGame = () => {
         let newIsBadFrogReaction = prev.isBadFrogReaction;
         let newIsInvincible = prev.isInvincible;
         let newInvincibilityTimer = prev.invincibilityTimer;
+        let newLastPortalX = prev.lastPortalX;
+        let newIsAdvancedLevel = prev.coins >= 100;
 
         // Handle invincibility timer
         if (newIsInvincible) {
-          newInvincibilityTimer -= 16 / 1000; // 16ms per frame
+          newInvincibilityTimer -= 16 / 1000;
           if (newInvincibilityTimer <= 0) {
             newIsInvincible = false;
             newInvincibilityTimer = 0;
@@ -367,14 +364,34 @@ const resetGame = () => {
         }
 
         if (!newInSpecialWorld) {
-          // Normal world - move pipes
-          newPipes = newPipes.map(pipe => ({ ...pipe, x: pipe.x - PIPE_SPEED }));
+          // Normal world - move pipes and handle advanced level
+          newPipes = newPipes.map(pipe => {
+            let updatedPipe = { ...pipe, x: pipe.x - PIPE_SPEED };
+            
+            // Advanced level: pipes move up and down
+            if (newIsAdvancedLevel) {
+              if (!pipe.yVelocity) {
+                updatedPipe.yVelocity = (Math.random() - 0.5) * 2;
+              }
+              
+              const newTopHeight = pipe.topHeight + (pipe.yVelocity || 0);
+              if (newTopHeight < 50 || newTopHeight > 250) {
+                updatedPipe.yVelocity = -(pipe.yVelocity || 0);
+              } else {
+                updatedPipe.topHeight = newTopHeight;
+              }
+            }
+            
+            return updatedPipe;
+          });
+          
           newPipes = newPipes.filter(pipe => pipe.x > -PIPE_WIDTH);
 
-          // Add new pipes
+          // Add new pipes with proper portal spacing
           if (newPipes.length === 0 || newPipes[newPipes.length - 1].x < 200) {
             const currentGap = getCurrentPipeGap(prev.coins);
-            const isSpecial = Math.random() < SPECIAL_PIPE_CHANCE;
+            const canBeSpecial = (400 - newLastPortalX) >= MIN_PORTAL_DISTANCE;
+            const isSpecial = canBeSpecial && Math.random() < SPECIAL_PIPE_CHANCE;
             const topHeight = Math.random() * 200 + 50;
             const pipeId = `pipe-${Date.now()}-${Math.random()}`;
             
@@ -384,11 +401,16 @@ const resetGame = () => {
               passed: false,
               isSpecial,
               gap: currentGap,
-              id: pipeId
+              id: pipeId,
+              yVelocity: newIsAdvancedLevel ? (Math.random() - 0.5) * 2 : 0
             });
+            
+            if (isSpecial) {
+              newLastPortalX = 400;
+            }
           }
 
-          // Check main world frog collection
+          // Check main world frog collection - Fixed logic
           newMainWorldFrogs = newMainWorldFrogs.map(frog => {
             if (!frog.collected) {
               const distance = Math.sqrt(
@@ -401,18 +423,29 @@ const resetGame = () => {
                   newCoins = Math.max(0, newCoins - 10);
                   newIsEating = true;
                   newIsBadFrogReaction = true;
-                  toast.error("💀 Bad Frog! -10 Frogs!");
                   
-                  // Reset bad frog reaction after delay
+                  // Reset reactions after delay
                   setTimeout(() => {
-                    setGameState(current => ({ ...current, isBadFrogReaction: false }));
+                    setGameState(current => ({ 
+                      ...current, 
+                      isBadFrogReaction: false,
+                      isEating: false 
+                    }));
                   }, 800);
                 } else {
                   // Good frog - gain points and grow
                   newCoins += 2;
                   newFrogsEaten += 1;
                   newIsEating = true;
-                  toast.success("🐸 Frog collected! +2 Frogs! Snake grows!");
+                  newIsBadFrogReaction = false; // Ensure no bad reaction for good frogs
+                  
+                  // Reset eating animation for good frogs
+                  setTimeout(() => {
+                    setGameState(current => ({ 
+                      ...current, 
+                      isEating: false 
+                    }));
+                  }, 300);
                 }
                 return { ...frog, collected: true };
               }
@@ -432,7 +465,7 @@ const resetGame = () => {
             });
           }
 
-          // Check pipe collisions and portal entry (only if not invincible for pipes)
+          // Check pipe collisions and portal entry
           newPipes.forEach(pipe => {
             const birdLeft = newBirdX;
             const birdRight = newBirdX + BIRD_SIZE;
@@ -442,28 +475,22 @@ const resetGame = () => {
             const pipeLeft = pipe.x;
             const pipeRight = pipe.x + PIPE_WIDTH;
 
-            // Check if bird is within pipe x range and hasn't used this portal before
             if (birdRight > pipeLeft && birdLeft < pipeRight && !newUsedPortalIds.has(pipe.id || '')) {
               if (pipe.isSpecial) {
-                // Special pipe - check if bird goes through the portal
                 const portalTop = pipe.topHeight + pipe.gap * 0.3;
                 const portalBottom = pipe.topHeight + pipe.gap * 0.7;
                 
                 if (birdTop >= portalTop && birdBottom <= portalBottom) {
-                  // Bird entered special world!
                   if (!newInSpecialWorld && pipe.id) {
                     const portalGame = generatePortalGame();
                     const gameResult = executePortalGame(portalGame);
                     
                     newInSpecialWorld = true;
                     newWorldCoins = generateWorldCoins();
-                    newCoins += 5 + gameResult.result; // Portal entry bonus + game result
+                    newCoins += 5 + gameResult.result;
                     newUsedPortalIds.add(pipe.id);
                     
-                    // Store the portal information for exit positioning
                     const enteredPortal = { x: pipe.x, topHeight: pipe.topHeight, gap: pipe.gap, id: pipe.id || '' };
-                    
-                    toast.success(`🌟 Portal Game: ${portalGame.toUpperCase()}! +${gameResult.result} bonus frogs!`);
                     
                     return {
                       ...prev,
@@ -490,18 +517,17 @@ const resetGame = () => {
                       showPortalGame: true,
                       isInvincible: false,
                       invincibilityTimer: 0,
-                      gameData: gameResult.gameData
+                      gameData: gameResult.gameData,
+                      lastPortalX: newLastPortalX,
+                      isAdvancedLevel: newIsAdvancedLevel
                     };
                   }
                 } else if (!newIsInvincible && (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + pipe.gap)) {
                   newGameOver = true;
-                  toast.error(`Game Over! Total Frogs: ${newCoins}`);
                 }
               } else {
-                // Regular pipe collision (only if not invincible)
                 if (!newIsInvincible && (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + pipe.gap)) {
                   newGameOver = true;
-                  toast.error(`Game Over! Total Frogs: ${newCoins}`);
                 }
               }
             }
@@ -510,31 +536,21 @@ const resetGame = () => {
             if (!pipe.passed && birdLeft > pipeRight) {
               pipe.passed = true;
               newCoins += pipe.isSpecial ? 3 : 1;
-              
-              if (pipe.isSpecial) {
-                toast.success(`⭐ Portal Passed! +3 Frogs!`);
-              } else {
-                toast.success(`Pipe Passed! +1 Frog`);
-              }
             }
           });
         } else {
-          // Special world - handle timer, frog collection, and exit
+          // Special world logic
           let newPortalTimer = prev.portalTimer;
           let newPortalExit = prev.portalExit;
           
-          // Initialize portal exit on first entry
           if (!newPortalExit) {
             newPortalExit = generatePortalExit();
           }
           
-          // Countdown timer
-          newPortalTimer -= 16 / 1000; // 16ms per frame
+          newPortalTimer -= 16 / 1000;
           
           if (newPortalTimer <= 0) {
-            // Timer expired - game over
             newGameOver = true;
-            toast.error("Time's up! Game Over!");
             return {
               ...prev,
               gameOver: newGameOver,
@@ -542,7 +558,7 @@ const resetGame = () => {
             };
           }
           
-          // Check frog collection in portal world
+          // Check frog collection in portal world - Fixed logic
           newWorldCoins = newWorldCoins.map(frog => {
             if (!frog.collected) {
               const distance = Math.sqrt(
@@ -555,31 +571,33 @@ const resetGame = () => {
                   newCoins = Math.max(0, newCoins - 10);
                   newIsEating = true;
                   newIsBadFrogReaction = true;
-                  toast.error("💀 Bad Frog! -10 Frogs!");
                   
-                  // Reset bad frog reaction after delay
                   setTimeout(() => {
-                    setGameState(current => ({ ...current, isBadFrogReaction: false }));
+                    setGameState(current => ({ 
+                      ...current, 
+                      isBadFrogReaction: false,
+                      isEating: false 
+                    }));
                   }, 800);
                 } else {
                   // Good frog - gain points and grow
                   newCoins += 2;
                   newFrogsEaten += 1;
                   newIsEating = true;
-                  toast.success("🐸 Frog collected! +2 Frogs! Snake grows!");
+                  newIsBadFrogReaction = false; // Ensure no bad reaction for good frogs
+                  
+                  setTimeout(() => {
+                    setGameState(current => ({ 
+                      ...current, 
+                      isEating: false 
+                    }));
+                  }, 300);
                 }
                 return { ...frog, collected: true };
               }
             }
             return frog;
           });
-          
-          // Reset eating animation after a short delay
-          if (newIsEating && !newIsBadFrogReaction) {
-            setTimeout(() => {
-              setGameState(current => ({ ...current, isEating: false }));
-            }, 300);
-          }
 
           // Check exit collision
           if (newPortalExit) {
@@ -588,30 +606,26 @@ const resetGame = () => {
             );
             
             if (exitDistance < 30) {
-              // Successfully exited portal - position snake at the CENTER of the portal and REMOVE the portal
-              let returnX = 200; // Default position
-              let returnY = 250; // Default position
+              let returnX = 200;
+              let returnY = 250;
               
               if (prev.enteredPortal) {
-                // Position snake at the CENTER of the portal they entered
                 returnX = prev.enteredPortal.x + PIPE_WIDTH / 2 - BIRD_SIZE / 2;
                 returnY = prev.enteredPortal.topHeight + prev.enteredPortal.gap / 2 - BIRD_SIZE / 2;
                 
-                // Make sure snake is within game bounds
                 returnX = Math.max(0, Math.min(370, returnX));
                 returnY = Math.max(0, Math.min(470, returnY));
-                
-                // Don't remove portal immediately, just mark as used
-                // Portal is already marked as used, so it won't be re-enterable
               }
               
+              // Make snake invincible for 2 seconds after exiting portal
               newInSpecialWorld = false;
               newWorldCoins = [];
               newPortalTimer = 10;
               newPortalExit = null;
               newBirdX = returnX;
               newBirdY = returnY;
-              toast.success("Portal vanished! Continue your journey!");
+              newIsInvincible = true;
+              newInvincibilityTimer = 2;
               
               return {
                 ...prev,
@@ -630,7 +644,11 @@ const resetGame = () => {
                 enteredPortal: null,
                 frogsEaten: newFrogsEaten,
                 isEating: newIsEating,
-                usedPortalIds: newUsedPortalIds
+                usedPortalIds: newUsedPortalIds,
+                isInvincible: newIsInvincible,
+                invincibilityTimer: newInvincibilityTimer,
+                lastPortalX: newLastPortalX,
+                isAdvancedLevel: newIsAdvancedLevel
               };
             }
           }
@@ -655,7 +673,9 @@ const resetGame = () => {
             isBadFrogReaction: newIsBadFrogReaction,
             isInvincible: newIsInvincible,
             invincibilityTimer: newInvincibilityTimer,
-            usedPortalIds: newUsedPortalIds
+            usedPortalIds: newUsedPortalIds,
+            lastPortalX: newLastPortalX,
+            isAdvancedLevel: newIsAdvancedLevel
           };
         }
 
@@ -680,13 +700,15 @@ const resetGame = () => {
           isBadFrogReaction: newIsBadFrogReaction,
           isInvincible: newIsInvincible,
           invincibilityTimer: newInvincibilityTimer,
-          usedPortalIds: newUsedPortalIds
+          usedPortalIds: newUsedPortalIds,
+          lastPortalX: newLastPortalX,
+          isAdvancedLevel: newIsAdvancedLevel
         };
       });
-    }, gameState.coins > 70 ? 20 : 12); // Optimize performance after 70 points
+    }, 16); // Fixed 60 FPS for consistent performance
 
     return () => clearInterval(gameLoop);
-  }, [gameState.gameStarted, gameState.gameOver, gameState.gamePaused, pressedKeys, gameState.coins]);
+  }, [gameState.gameStarted, gameState.gameOver, gameState.gamePaused, pressedKeys]);
 
   return (
     <div className="flex flex-col items-center gap-4 p-4">
@@ -708,6 +730,11 @@ const resetGame = () => {
               <span className="ml-2 text-red-400 font-bold">⏰ {Math.ceil(gameState.portalTimer)}s</span>
             </div>
           )}
+          {gameState.isAdvancedLevel && (
+            <div className="bg-red-500/20 px-3 py-1 rounded-lg border border-red-500">
+              <span className="text-red-400 font-bold">🔥 ADVANCED LEVEL</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -716,6 +743,8 @@ const resetGame = () => {
         className={`relative w-[400px] h-[500px] border-2 border-border rounded-lg overflow-hidden select-none transition-all duration-1000 ${
           gameState.inSpecialWorld 
             ? 'bg-gradient-to-b from-purple-600 via-pink-500 to-cyan-600' 
+            : gameState.isAdvancedLevel
+            ? 'bg-gradient-to-b from-red-600 via-orange-500 to-yellow-600'
             : gameState.colorTheme % 5 === 0 ? 'bg-gradient-to-b from-blue-400 to-blue-600' :
               gameState.colorTheme % 5 === 1 ? 'bg-gradient-to-b from-orange-400 to-red-500' :
               gameState.colorTheme % 5 === 2 ? 'bg-gradient-to-b from-green-400 to-emerald-600' :
@@ -724,7 +753,6 @@ const resetGame = () => {
         }`}
       >
         {/* Enhanced Snake with Body Segments */}
-        {/* Snake Head */}
         <div
           className={`absolute transition-all duration-100 ${
             gameState.inSpecialWorld ? 'animate-pulse' : ''
@@ -759,7 +787,6 @@ const resetGame = () => {
                   gameState.frogsEaten >= 5 ? 'bg-gradient-to-br from-purple-300/30 to-pink-500/30' :
                   'bg-gradient-to-br from-cyan-300/30 to-emerald-500/30'
                 } animate-pulse`}></div>
-                {/* Diamond pattern for advanced snakes */}
                 <div className={`absolute w-2 h-2 top-1 left-1/2 transform -translate-x-1/2 rotate-45 ${
                   gameState.frogsEaten >= 10 ? 'bg-gold-300' :
                   gameState.frogsEaten >= 5 ? 'bg-purple-300' : 'bg-cyan-300'
@@ -858,7 +885,6 @@ const resetGame = () => {
                 animation: 'bounce 2s ease-in-out infinite'
               }}
             >
-              {/* Smaller frog for main world */}
               <div className={`absolute w-6 h-4 rounded-full border left-1 top-1 ${
                 frog.isBad 
                   ? 'bg-gradient-to-br from-red-500 to-red-700 border-red-400' 
@@ -871,7 +897,6 @@ const resetGame = () => {
                   : 'bg-gradient-to-br from-green-300 to-green-500 border-green-400'
               }`}></div>
               
-              {/* Small eyes */}
               <div className={`absolute w-1.5 h-1.5 rounded-full top-0 left-1 border border-black z-10 ${
                 frog.isBad ? 'bg-red-300' : 'bg-yellow-400'
               }`}>
@@ -908,21 +933,18 @@ const resetGame = () => {
                 animation: 'bounce 2s ease-in-out infinite'
               }}
             >
-              {/* Frog body (oval shape) - Red for bad frogs */}
               <div className={`absolute w-8 h-6 rounded-full border-2 left-1 top-1 ${
                 frog.isBad 
                   ? 'bg-gradient-to-br from-red-500 to-red-700 border-red-400' 
                   : 'bg-gradient-to-br from-green-400 to-green-600 border-green-300'
               }`}></div>
               
-              {/* Frog head (slightly overlapping body) - Red for bad frogs */}
               <div className={`absolute w-6 h-5 rounded-full border left-2 top-0 ${
                 frog.isBad 
                   ? 'bg-gradient-to-br from-red-400 to-red-600 border-red-500' 
                   : 'bg-gradient-to-br from-green-300 to-green-500 border-green-400'
               }`}></div>
               
-              {/* Large protruding eyes on top of head - Red for bad frogs */}
               <div className={`absolute w-2.5 h-2.5 rounded-full top-0 left-1.5 border border-black z-10 ${
                 frog.isBad ? 'bg-red-300' : 'bg-yellow-400'
               }`}>
@@ -938,12 +960,10 @@ const resetGame = () => {
                 }`}></div>
               </div>
               
-              {/* Frog mouth - Darker for bad frogs */}
               <div className={`absolute w-3 h-1 rounded-full left-1/2 top-3 transform -translate-x-1/2 ${
                 frog.isBad ? 'bg-red-800' : 'bg-green-600'
               }`}></div>
               
-              {/* Front legs/arms - Red for bad frogs */}
               <div className={`absolute w-2 h-3 rounded-full left-0 top-2 ${
                 frog.isBad ? 'bg-red-600' : 'bg-green-500'
               }`}></div>
@@ -951,7 +971,6 @@ const resetGame = () => {
                 frog.isBad ? 'bg-red-600' : 'bg-green-500'
               }`}></div>
               
-              {/* Back legs (visible from side) - Red for bad frogs */}
               <div className={`absolute w-1.5 h-4 rounded-full left-0.5 bottom-0 ${
                 frog.isBad ? 'bg-red-700' : 'bg-green-600'
               }`}></div>
@@ -959,7 +978,6 @@ const resetGame = () => {
                 frog.isBad ? 'bg-red-700' : 'bg-green-600'
               }`}></div>
               
-              {/* Bad frog indicator */}
               {frog.isBad && (
                 <div className="absolute -top-2 left-1/2 transform -translate-x-1/2 text-xs animate-pulse">
                   💀
@@ -1004,10 +1022,9 @@ const resetGame = () => {
               top: `${segment.y}px`,
               width: `${Math.max(15, 25 - index * 1.5)}px`,
               height: `${Math.max(12, 20 - index * 1.2)}px`,
-              zIndex: 90 - index // Ensure proper layering
+              zIndex: 90 - index
             }}
           >
-            {/* Body segment pattern */}
             <div className={`absolute inset-1 rounded-full ${
               gameState.frogsEaten >= 10 ? 'bg-gradient-to-br from-gold-400/40 to-amber-600/40' :
               gameState.frogsEaten >= 5 ? 'bg-gradient-to-br from-purple-400/40 to-pink-600/40' :
@@ -1020,11 +1037,12 @@ const resetGame = () => {
         {/* Pipes (only in normal world) */}
         {!gameState.inSpecialWorld && gameState.pipes.map((pipe, index) => (
           <div key={index}>
-            {/* Top pipe */}
             <div
               className={`absolute border-2 border-foreground rounded-b-lg shadow-lg ${
                 pipe.isSpecial 
                   ? 'bg-gradient-to-b from-purple-500 to-purple-700 border-purple-300 shadow-purple-500/50' 
+                  : gameState.isAdvancedLevel
+                  ? 'bg-gradient-to-b from-red-600 to-red-800 border-red-300'
                   : 'bg-gradient-to-b from-green-600 to-green-800'
               }`}
               style={{
@@ -1034,20 +1052,17 @@ const resetGame = () => {
                 height: `${pipe.topHeight}px`
               }}
             >
-              {/* Pipe ridges for realism */}
               <div className="absolute w-full h-1 bg-black/20 top-2"></div>
               <div className="absolute w-full h-1 bg-black/20 bottom-4"></div>
               
               {pipe.isSpecial && (
                 <>
-                  {/* Special pipe portal effect */}
                   <div className="absolute inset-2 bg-gradient-to-b from-cyan-400/30 to-purple-400/30 rounded animate-pulse"></div>
                   <div className="absolute top-1 right-1 w-2 h-2 bg-yellow-400 rounded-full animate-ping"></div>
                 </>
               )}
             </div>
             
-            {/* Portal opening indicator */}
             {pipe.isSpecial && (
               <div
                 className="absolute bg-gradient-to-r from-cyan-400 to-purple-400 border-2 border-yellow-400 rounded animate-pulse"
@@ -1066,11 +1081,12 @@ const resetGame = () => {
               </div>
             )}
             
-            {/* Bottom pipe */}
             <div
               className={`absolute border-2 border-foreground rounded-t-lg shadow-lg ${
                 pipe.isSpecial 
                   ? 'bg-gradient-to-t from-purple-500 to-purple-700 border-purple-300 shadow-purple-500/50' 
+                  : gameState.isAdvancedLevel
+                  ? 'bg-gradient-to-t from-red-600 to-red-800 border-red-300'
                   : 'bg-gradient-to-t from-green-600 to-green-800'
               }`}
               style={{
@@ -1080,13 +1096,11 @@ const resetGame = () => {
                 height: `${500 - (pipe.topHeight + pipe.gap)}px`
               }}
             >
-              {/* Pipe ridges for realism */}
               <div className="absolute w-full h-1 bg-black/20 top-4"></div>
               <div className="absolute w-full h-1 bg-black/20 bottom-2"></div>
               
               {pipe.isSpecial && (
                 <>
-                  {/* Special pipe portal effect */}
                   <div className="absolute inset-2 bg-gradient-to-t from-cyan-400/30 to-purple-400/30 rounded animate-pulse"></div>
                   <div className="absolute bottom-1 left-1 w-2 h-2 bg-yellow-400 rounded-full animate-ping"></div>
                 </>
@@ -1095,7 +1109,6 @@ const resetGame = () => {
           </div>
         ))}
 
-        {/* Ground */}
         <div className="absolute bottom-0 w-full h-12 bg-gradient-to-b from-green-700 to-green-900 border-t-2 border-foreground" />
 
         {/* Portal Game Result Overlay */}
@@ -1168,7 +1181,6 @@ const resetGame = () => {
           </div>
         )}
 
-        {/* Game Over Overlay */}
         {gameState.gameOver && (
           <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
             <div className="text-center bg-card p-6 rounded-lg border shadow-lg">
@@ -1185,7 +1197,6 @@ const resetGame = () => {
           </div>
         )}
 
-        {/* Start Screen */}
         {!gameState.gameStarted && !gameState.gameOver && (
           <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
             <div className="text-center bg-card p-6 rounded-lg border shadow-lg">
@@ -1210,6 +1221,9 @@ const resetGame = () => {
         <p>Fly through <strong>purple portals</strong> to enter special worlds and collect frogs!</p>
         <p className="text-yellow-600 font-medium">Find the exit within 10 seconds or game over!</p>
         <p className="text-green-600 font-medium">Collect frogs in both main world and portal worlds!</p>
+        {gameState.isAdvancedLevel && (
+          <p className="text-red-600 font-bold">🔥 Advanced Level: Moving pipes activated!</p>
+        )}
       </div>
 
       {gameState.gameStarted && !gameState.gameOver && (
