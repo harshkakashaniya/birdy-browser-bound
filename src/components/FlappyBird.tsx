@@ -521,7 +521,7 @@ export const FlappyBird = () => {
                       mainWorldFrogs: newMainWorldFrogs,
                       colorTheme: newColorTheme,
                       portalTimer: 10,
-                      portalExit: null,
+                      portalExit: generatePortalExit(),
                       enteredPortal: enteredPortal,
                       frogsEaten: newFrogsEaten,
                       isEating: newIsEating,
@@ -536,7 +536,7 @@ export const FlappyBird = () => {
                       lastPortalX: newLastPortalX,
                       isAdvancedLevel: newIsAdvancedLevel,
                       portalTriggerFrog: triggerFrog,
-                      portalCountdownActive: false
+                      portalCountdownActive: true
                     };
                   }
                 } else if (!newIsInvincible && (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + pipe.gap)) {
@@ -590,6 +590,7 @@ export const FlappyBird = () => {
                 ...prev,
                 coins: newCoins,
                 showPortalGame: true,
+                portalCountdownActive: false,
                 portalGameResult: result,
                 gameData: gd,
                 portalTriggerFrog: null,
@@ -1040,23 +1041,22 @@ export const FlappyBird = () => {
               left: `${gameState.portalTriggerFrog.x}px`,
               top: `${gameState.portalTriggerFrog.y}px`,
               animation: 'bounce 2s ease-in-out infinite',
-              zIndex: 40
+              zIndex: 95
             }}
           >
-            {/* Glow */}
-            <div className="absolute -inset-2 rounded-full bg-yellow-400/30 blur-md animate-pulse" />
-            <div className="absolute -inset-1 rounded-full bg-yellow-300/20 blur-sm" />
-            {/* Frog Body */}
-            <div className="absolute w-10 h-7 rounded-full border-2 left-1 top-1 bg-gradient-to-br from-green-300 to-green-500 border-yellow-300" />
-            <div className="absolute w-7 h-6 rounded-full border left-2 top-0 bg-gradient-to-br from-green-200 to-green-400 border-yellow-400" />
+            {/* Golden Glow */}
+            <div className="absolute -inset-3 rounded-full bg-amber-400/40 blur-lg animate-pulse" />
+            <div className="absolute -inset-1 rounded-full bg-amber-300/30 blur-sm" />
+            {/* Golden Frog Body */}
+            <div className="absolute w-10 h-7 rounded-full border-2 left-1 top-1 bg-gradient-to-br from-amber-300 via-yellow-400 to-amber-500 border-amber-300" />
+            <div className="absolute w-7 h-6 rounded-full border left-2 top-0 bg-gradient-to-br from-yellow-200 via-amber-300 to-yellow-400 border-amber-400" />
             {/* Eyes */}
-            <div className="absolute w-3 h-3 rounded-full top-0.5 left-2 border border-black z-10 bg-yellow-200">
+            <div className="absolute w-3 h-3 rounded-full top-0.5 left-2 border border-black z-10 bg-amber-200">
               <div className="absolute w-2 h-2 rounded-full top-0.5 left-0.5 bg-black" />
             </div>
-            <div className="absolute w-3 h-3 rounded-full top-0.5 right-2 border border-black z-10 bg-yellow-200">
+            <div className="absolute w-3 h-3 rounded-full top-0.5 right-2 border border-black z-10 bg-amber-200">
               <div className="absolute w-2 h-2 rounded-full top-0.5 left-0.5 bg-black" />
             </div>
-            <div className="absolute -top-5 left-1/2 -translate-x-1/2 text-xs font-bold text-yellow-300 animate-bounce">PRESS</div>
           </div>
         )}
 
@@ -1248,8 +1248,7 @@ export const FlappyBird = () => {
                 onClick={() => setGameState(prev => ({ 
                   ...prev, 
                   showPortalGame: false,
-                  portalCountdownActive: true,
-                  portalExit: prev.portalExit ?? generatePortalExit()
+                  portalCountdownActive: true
                 }))} 
                 className="w-full"
               >
