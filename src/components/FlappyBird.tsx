@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
+
 
 interface BodySegment {
   x: number;
@@ -41,8 +41,9 @@ interface GameState {
   };
   lastPortalX: number;
   isAdvancedLevel: boolean;
-  portalTriggerFrog: { x: number; y: number; id: string } | null;
   portalCountdownActive: boolean;
+  portalGameTriggered: boolean;
+  portalGameButton: { x: number; y: number } | null;
 }
 
 const BIRD_SIZE = 30;
@@ -90,8 +91,9 @@ export const FlappyBird = () => {
     },
     lastPortalX: -1000,
     isAdvancedLevel: false,
-    portalTriggerFrog: null,
-    portalCountdownActive: false
+    portalCountdownActive: false,
+    portalGameTriggered: false,
+    portalGameButton: null
   });
 
   const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
@@ -146,8 +148,9 @@ export const FlappyBird = () => {
       },
       lastPortalX: -1000,
       isAdvancedLevel: false,
-      portalTriggerFrog: null,
-      portalCountdownActive: false
+      portalCountdownActive: false,
+      portalGameTriggered: false,
+      portalGameButton: null
     });
   };
 
@@ -176,14 +179,14 @@ export const FlappyBird = () => {
   // Execute portal game
   const executePortalGame = (gameType: string) => {
     let result = 0;
-    let gameData = { dice: [1, 1], cards: [1, 2, 3, 4, 5], selectedCards: [] };
+    let gameData: { dice: [number, number]; cards: number[]; selectedCards: number[] } = { dice: [1, 1], cards: [1, 2, 3, 4, 5], selectedCards: [] };
 
     switch (gameType) {
       case 'dice':
         const dice1 = Math.floor(Math.random() * 6) + 1;
         const dice2 = Math.floor(Math.random() * 6) + 1;
         result = dice1 + dice2;
-        gameData.dice = [dice1, dice2];
+        gameData.dice = [dice1, dice2] as [number, number];
         break;
       case 'cards':
         const availableCards = [1, 2, 3, 4, 5].sort(() => Math.random() - 0.5);
@@ -212,12 +215,11 @@ export const FlappyBird = () => {
     };
   };
 
-  // Generate glowing frog trigger position
-  const generatePortalTriggerFrog = () => {
+  // Generate portal game trigger button position
+  const generatePortalGameButton = () => {
     return {
       x: Math.random() * 300 + 50,
-      y: Math.random() * 300 + 50,
-      id: `trigger-${Date.now()}`
+      y: Math.random() * 300 + 50
     };
   };
 
@@ -498,15 +500,13 @@ export const FlappyBird = () => {
                 if (birdTop >= portalTop && birdBottom <= portalBottom) {
                   if (!newInSpecialWorld && pipe.id) {
                     const portalGame = generatePortalGame();
-
+                    
                     newInSpecialWorld = true;
                     newWorldCoins = generateWorldCoins();
-                    newCoins += 5; // base reward for entering portal
                     newUsedPortalIds.add(pipe.id);
-
+                    
                     const enteredPortal = { x: pipe.x, topHeight: pipe.topHeight, gap: pipe.gap, id: pipe.id || '' };
-                    const triggerFrog = generatePortalTriggerFrog();
-
+                    
                     return {
                       ...prev,
                       birdX: newBirdX,
@@ -521,7 +521,7 @@ export const FlappyBird = () => {
                       mainWorldFrogs: newMainWorldFrogs,
                       colorTheme: newColorTheme,
                       portalTimer: 10,
-                      portalExit: generatePortalExit(),
+                      portalExit: null,
                       enteredPortal: enteredPortal,
                       frogsEaten: newFrogsEaten,
                       isEating: newIsEating,
@@ -532,11 +532,12 @@ export const FlappyBird = () => {
                       showPortalGame: false,
                       isInvincible: false,
                       invincibilityTimer: 0,
-                      gameData: { dice: [1,1], cards: [1,2,3,4,5], selectedCards: [] },
+                      gameData: prev.gameData,
                       lastPortalX: newLastPortalX,
                       isAdvancedLevel: newIsAdvancedLevel,
-                      portalTriggerFrog: triggerFrog,
-                      portalCountdownActive: true
+                      portalCountdownActive: false,
+                      portalGameTriggered: false,
+                      portalGameButton: generatePortalGameButton()
                     };
                   }
                 } else if (!newIsInvincible && (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + pipe.gap)) {
@@ -559,44 +560,22 @@ export const FlappyBird = () => {
           // Special world logic
           let newPortalTimer = prev.portalTimer;
           let newPortalExit = prev.portalExit;
-          let newPortalTriggerFrog = prev.portalTriggerFrog;
-          let newPortalCountdownActive = prev.portalCountdownActive;
           
-          // Countdown only when active and not showing game overlay
-          if (newPortalCountdownActive && !prev.showPortalGame) {
+          if (!newPortalExit) {
+            newPortalExit = generatePortalExit();
+          }
+          
+          if (prev.portalCountdownActive && !prev.showPortalGame) {
             newPortalTimer -= 16 / 1000;
           }
           
-          if (newPortalTimer <= 0) {
+          if (newPortalTimer <= 0 && prev.portalCountdownActive) {
             newGameOver = true;
             return {
               ...prev,
               gameOver: newGameOver,
               portalTimer: 0
             };
-          }
-          
-          // Trigger glowing frog collision to start portal mini-game
-          if (newPortalTriggerFrog) {
-            const dist = Math.sqrt(
-              Math.pow(newBirdX - newPortalTriggerFrog.x, 2) + Math.pow(newBirdY - newPortalTriggerFrog.y, 2)
-            );
-            if (dist < 28 && prev.currentPortalGame) {
-              const exec = executePortalGame(prev.currentPortalGame);
-              const result = exec.result;
-              const gd = exec.gameData as GameState['gameData'];
-              newCoins += result;
-              return {
-                ...prev,
-                coins: newCoins,
-                showPortalGame: true,
-                portalCountdownActive: false,
-                portalGameResult: result,
-                gameData: gd,
-                portalTriggerFrog: null,
-                portalTimer: newPortalTimer
-              };
-            }
           }
           
           // Check frog collection in portal world - Fixed logic
@@ -640,8 +619,49 @@ export const FlappyBird = () => {
             return frog;
           });
 
-          // Check exit collision when exit exists
-          if (newPortalExit) {
+          // Trigger portal mini-game by pressing the button
+          if (!prev.portalGameTriggered && prev.portalGameButton) {
+            const btnDistance = Math.sqrt(
+              Math.pow(newBirdX - prev.portalGameButton.x, 2) + Math.pow(newBirdY - prev.portalGameButton.y, 2)
+            );
+            if (btnDistance < 30) {
+              const gameType = prev.currentPortalGame || generatePortalGame();
+              const { result, gameData } = executePortalGame(gameType);
+              newCoins += 5 + result;
+              return {
+                ...prev,
+                birdX: newBirdX,
+                birdY: newBirdY,
+                bodySegments: newBodySegments,
+                birdDirection: { x: newDirectionX, y: newDirectionY },
+                pipes: newPipes,
+                coins: newCoins,
+                gameOver: newGameOver,
+                inSpecialWorld: newInSpecialWorld,
+                worldCoins: newWorldCoins,
+                colorTheme: newColorTheme,
+                portalTimer: newPortalTimer,
+                portalExit: null,
+                frogsEaten: newFrogsEaten,
+                isEating: newIsEating,
+                isBadFrogReaction: newIsBadFrogReaction,
+                isInvincible: newIsInvincible,
+                invincibilityTimer: newInvincibilityTimer,
+                usedPortalIds: newUsedPortalIds,
+                lastPortalX: newLastPortalX,
+                isAdvancedLevel: newIsAdvancedLevel,
+                currentPortalGame: gameType,
+                portalGameResult: result,
+                gameData,
+                showPortalGame: true,
+                portalGameTriggered: true,
+                portalGameButton: null
+              };
+            }
+          }
+
+          // Check exit collision (only when countdown active)
+          if (prev.portalCountdownActive && newPortalExit) {
             const exitDistance = Math.sqrt(
               Math.pow(newBirdX - newPortalExit.x, 2) + Math.pow(newBirdY - newPortalExit.y, 2)
             );
@@ -667,7 +687,6 @@ export const FlappyBird = () => {
               newBirdY = returnY;
               newIsInvincible = true;
               newInvincibilityTimer = 2;
-              newPortalCountdownActive = false;
               
               return {
                 ...prev,
@@ -690,9 +709,7 @@ export const FlappyBird = () => {
                 isInvincible: newIsInvincible,
                 invincibilityTimer: newInvincibilityTimer,
                 lastPortalX: newLastPortalX,
-                isAdvancedLevel: newIsAdvancedLevel,
-                portalTriggerFrog: null,
-                portalCountdownActive: newPortalCountdownActive
+                isAdvancedLevel: newIsAdvancedLevel
               };
             }
           }
@@ -719,9 +736,7 @@ export const FlappyBird = () => {
             invincibilityTimer: newInvincibilityTimer,
             usedPortalIds: newUsedPortalIds,
             lastPortalX: newLastPortalX,
-            isAdvancedLevel: newIsAdvancedLevel,
-            portalTriggerFrog: newPortalTriggerFrog,
-            portalCountdownActive: newPortalCountdownActive
+            isAdvancedLevel: newIsAdvancedLevel
           };
         }
 
@@ -808,8 +823,8 @@ export const FlappyBird = () => {
           style={{
             left: `${gameState.birdX}px`,
             top: `${gameState.birdY}px`,
-            width: `${Math.min(50, 30 + gameState.frogsEaten * 3)}px`,
-            height: `${Math.min(40, 25 + gameState.frogsEaten * 2)}px`,
+            width: `${BIRD_SIZE}px`,
+            height: `${BIRD_SIZE}px`,
             transform: `rotate(${gameState.birdDirection.x > 0 ? '15deg' : 
               gameState.birdDirection.x < 0 ? '-15deg' : 
               gameState.birdDirection.y > 0 ? '90deg' : 
@@ -1033,30 +1048,13 @@ export const FlappyBird = () => {
           )
         ))}
 
-        {/* Glowing Frog Trigger (only in special world before game starts) */}
-        {gameState.inSpecialWorld && gameState.portalTriggerFrog && (
+        {/* Portal Game Button (only in special world before triggering) */}
+        {gameState.inSpecialWorld && !gameState.portalGameTriggered && gameState.portalGameButton && (
           <div
-            className="absolute w-12 h-10 animate-bounce shadow-2xl"
-            style={{
-              left: `${gameState.portalTriggerFrog.x}px`,
-              top: `${gameState.portalTriggerFrog.y}px`,
-              animation: 'bounce 2s ease-in-out infinite',
-              zIndex: 95
-            }}
+            className="absolute w-16 h-16 rounded-full border-4 border-yellow-400 bg-gradient-to-br from-purple-400 to-pink-400 shadow-xl flex items-center justify-center animate-pulse"
+            style={{ left: `${gameState.portalGameButton.x}px`, top: `${gameState.portalGameButton.y}px` }}
           >
-            {/* Golden Glow */}
-            <div className="absolute -inset-3 rounded-full bg-amber-400/40 blur-lg animate-pulse" />
-            <div className="absolute -inset-1 rounded-full bg-amber-300/30 blur-sm" />
-            {/* Golden Frog Body */}
-            <div className="absolute w-10 h-7 rounded-full border-2 left-1 top-1 bg-gradient-to-br from-amber-300 via-yellow-400 to-amber-500 border-amber-300" />
-            <div className="absolute w-7 h-6 rounded-full border left-2 top-0 bg-gradient-to-br from-yellow-200 via-amber-300 to-yellow-400 border-amber-400" />
-            {/* Eyes */}
-            <div className="absolute w-3 h-3 rounded-full top-0.5 left-2 border border-black z-10 bg-amber-200">
-              <div className="absolute w-2 h-2 rounded-full top-0.5 left-0.5 bg-black" />
-            </div>
-            <div className="absolute w-3 h-3 rounded-full top-0.5 right-2 border border-black z-10 bg-amber-200">
-              <div className="absolute w-2 h-2 rounded-full top-0.5 left-0.5 bg-black" />
-            </div>
+            <span className="text-white font-bold text-xs text-center">PRESS</span>
           </div>
         )}
 
@@ -1248,7 +1246,9 @@ export const FlappyBird = () => {
                 onClick={() => setGameState(prev => ({ 
                   ...prev, 
                   showPortalGame: false,
-                  portalCountdownActive: true
+                  portalCountdownActive: true,
+                  portalExit: prev.portalExit ?? generatePortalExit(),
+                  portalGameButton: null
                 }))} 
                 className="w-full"
               >
@@ -1295,8 +1295,8 @@ export const FlappyBird = () => {
 
       <div className="text-center text-sm text-muted-foreground max-w-md">
         <p>Use <strong>WASD</strong> keys to control the snake! Press <strong>SPACEBAR</strong> to pause!</p>
-        <p>Fly through <strong>purple portals</strong> to enter special worlds and collect frogs!</p>
-        <p className="text-yellow-600 font-medium">Find the exit within 10 seconds or game over!</p>
+        <p>In portal worlds, find and touch the glowing button to trigger the mini-game.</p>
+        <p className="text-yellow-600 font-medium">After the result, reach the EXIT within 10 seconds!</p>
         <p className="text-green-600 font-medium">Collect frogs in both main world and portal worlds!</p>
         {gameState.isAdvancedLevel && (
           <p className="text-red-600 font-bold">🔥 Advanced Level: Moving pipes activated!</p>
